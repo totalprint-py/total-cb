@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block titulo %}Tablero de Conciliación{% endblock %}
+
+{% block contenido %}
+<div x-data="emparejador()">
+    <!-- Encabezado: Panel de Control -->
+    <div class="mb-4">
+        <h1 class="h2 fw-semibold mb-1">Panel de Control</h1>
+        <p class="text-secondary mb-0">Hoy, {% now "d/m/Y" %}</p>
+    </div>
+
+    <!-- KPI / Resumen -->
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3 mb-md-0">
+            <div class="card border-primary shadow-sm h-100">
+                <div class="card-body">
+                    <p class="text-primary fw-semibold mb-1">Bancarios Pendientes</p>
+                    <p class="fs-2 fw-bold mb-0">15</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3 mb-md-0">
+            <div class="card border-warning shadow-sm h-100">
+                <div class="card-body">
+                    <p class="text-warning-emphasis fw-semibold mb-1">Internos Pendientes</p>
+                    <p class="fs-2 fw-bold mb-0">8</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-success shadow-sm h-100">
+                <div class="card-body">
+                    <p class="text-success fw-semibold mb-1">Estado de Caja</p>
+                    <p class="fs-2 fw-bold mb-0">Al día</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Listas de movimientos -->
+    <div class="row mb-4">
+        <div class="col-md-6 mb-3 mb-md-0">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex align-items-center justify-content-between">
+                    <div>
+                        <h2 class="h6 fw-semibold mb-1">Movimientos Bancarios</h2>
+                        <p class="small text-secondary mb-0">Sin conciliar</p>
+                    </div>
+                    <span class="badge rounded-pill text-bg-primary">15</span>
+                </div>
+                <div class="card-body overflow-auto" style="max-height: 420px;">
+                    <ul class="list-unstyled mb-0">
+                        {% for movimiento in movimientos_bancarios %}
+                        <li class="mb-2">
+                            <button type="button"
+                                    class="btn w-100 text-start"
+                                    :class="seleccion.bancario == '{{ movimiento.pk }}' ? 'btn-primary' : 'btn-outline-secondary'"
+                                    @click="seleccion.bancario = '{{ movimiento.pk }}'">
+                                <span class="fw-semibold d-block">{{ movimiento.importe }}</span>
+                                <span class="small text-secondary">
+                                    {{ movimiento.fecha|date:"d/m/Y" }} — {{ movimiento.tipo_operacion }}
+                                    {% if movimiento.en_consulta %}<span class="text-warning-emphasis">(En Consulta)</span>{% endif %}
+                                </span>
+                            </button>
+                        </li>
+                        {% empty %}
+                        <li class="small text-secondary">Sin movimientos bancarios sin conciliar.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex align-items-center justify-content-between">
+                    <div>
+                        <h2 class="h6 fw-semibold mb-1">Movimientos Internos</h2>
+                        <p class="small text-secondary mb-0">Sin conciliar</p>
+                    </div>
+                    <span class="badge rounded-pill text-bg-success">8</span>
+                </div>
+                <div class="card-body overflow-auto" style="max-height: 420px;">
+                    <ul class="list-unstyled mb-0">
+                        {% for movimiento in movimientos_internos %}
+                        <li class="mb-2">
+                            <button type="button"
+                                    class="btn w-100 text-start"
+                                    :class="seleccion.interno == '{{ movimiento.pk }}' ? 'btn-primary' : 'btn-outline-secondary'"
+                                    @click="seleccion.interno = '{{ movimiento.pk }}'">
+                                <span class="fw-semibold d-block">{{ movimiento.importe }}</span>
+                                <span class="small text-secondary">
+                                    {{ movimiento.fecha|date:"d/m/Y" }} — {{ movimiento.tipo_operacion }}
+                                </span>
+                            </button>
+                        </li>
+                        {% empty %}
+                        <li class="small text-secondary">Sin movimientos internos sin conciliar.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form method="post" action="{% url 'emparejar_movimientos' %}" class="card shadow-sm">
+        <div class="card-body">
+            {% csrf_token %}
+            <input type="hidden" name="bancario_id" :value="seleccion.bancario">
+            <input type="hidden" name="interno_id" :value="seleccion.interno">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h2 class="h6 fw-semibold mb-1">Acción de conciliación</h2>
+                    <p x-show="!seleccion.bancario || !seleccion.interno" class="small text-secondary mb-0">
+                        Seleccione un movimiento bancario y un movimiento interno para emparejarlos.
+                    </p>
+                    <p x-show="seleccion.bancario && seleccion.interno" class="small text-secondary mb-0">
+                        Movimientos listos para emparejar.
+                    </p>
+                </div>
+                <div class="col-md-4 mt-3 mt-md-0">
+                    <button type="submit"
+                            class="btn btn-primary btn-lg w-100"
+                            :disabled="!seleccion.bancario || !seleccion.interno">
+                        Emparejar seleccionados
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+    function emparejador() {
+        return {
+            seleccion: { bancario: null, interno: null }
+        };
+    }
+</script>
+{% endblock %}

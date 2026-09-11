@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block titulo %}Reporte de Verificación Manual{% endblock %}
+
+{% block contenido %}
+<link rel="stylesheet" href="{% static 'css/print.css' %}">
+
+<div class="no-print d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-semibold mb-0">Reporte de Verificación Manual</h2>
+    <div class="d-flex gap-2">
+        <button type="button" onclick="window.print()" class="btn btn-outline-secondary">Imprimir</button>
+        <a href="{% url 'tablero' %}" class="btn btn-primary">Volver al tablero</a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4 print-card">
+    <div class="card-header bg-white py-3">
+        <h4 class="mb-1">Movimientos Bancarios sin Conciliar</h4>
+        <p class="text-muted small mb-0">Movimientos del extracto bancario pendientes de verificación manual.</p>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Fecha</th>
+                    <th>Importe</th>
+                    <th>Tipo de operación</th>
+                    <th>Notas</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for movimiento in movimientos_bancarios %}
+                <tr>
+                    <td>{{ movimiento.fecha|date:"d/m/Y" }}</td>
+                    <td>{{ movimiento.importe }}</td>
+                    <td>{{ movimiento.tipo_operacion }}</td>
+                    <td>{{ movimiento.notas|default:"—" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted">Sin movimientos bancarios sin conciliar.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4 print-card">
+    <div class="card-header bg-white py-3">
+        <h4 class="mb-1">Movimientos Internos sin Conciliar</h4>
+        <p class="text-muted small mb-0">Movimientos del sistema interno pendientes de verificación manual.</p>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Fecha</th>
+                    <th>Importe</th>
+                    <th>Tipo de operación</th>
+                    <th>Notas</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for movimiento in movimientos_internos %}
+                <tr>
+                    <td>{{ movimiento.fecha|date:"d/m/Y" }}</td>
+                    <td>{{ movimiento.importe }}</td>
+                    <td>{{ movimiento.tipo_operacion }}</td>
+                    <td>{{ movimiento.notas|default:"—" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted">Sin movimientos internos sin conciliar.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

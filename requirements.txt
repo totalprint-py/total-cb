@@ -1,0 +1,8 @@
+# Core Reconciliation Engine — Dependencias de Python (Principio 1 de la Constitución).
+# Se requiere Django 5.1+; la versión instalada 6.0.x cumple con "5.1+".
+Django>=5.1,<7.0
+pytest>=8.0
+pytest-django>=4.8
+# Herramienta para empaquetar la aplicación en un ejecutable de Windows (.exe).
+# Se requiere >= 6.16 para ser compatible con Python 3.14.
+pyinstaller>=6.16

@@ -1,0 +1,12 @@
+{% for campo in form %}
+<div class="mb-3">
+    <label for="{{ campo.id_for_label }}" class="form-label fw-bold">{{ campo.label }}</label>
+    {{ campo }}
+    {% if campo.help_text %}
+    <div class="form-text">{{ campo.help_text }}</div>
+    {% endif %}
+    {% if campo.errors %}
+    <div class="text-danger small">{{ campo.errors|join:", " }}</div>
+    {% endif %}
+</div>
+{% endfor %}

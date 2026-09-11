@@ -1,0 +1,46 @@
+# --- Python / Django ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+
+# Base de datos local (no versionar)
+db.sqlite3
+*.sqlite3
+
+# Estáticos generados por collectstatic
+staticfiles/
+
+# Artefactos de empaquetado
+build/
+dist/
+
+# Caché y cobertura de pruebas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Herramientas / IDE ---
+.vscode/
+.idea/
+.claude/
+.specify/
+
+# --- Sistema operativo ---
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# --- Documentos personales ajenos al proyecto ---
+*.pdf
+*.xlsx
+*.xls
+*.doc
+*.docx
