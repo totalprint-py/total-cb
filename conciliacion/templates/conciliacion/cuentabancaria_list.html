@@ -29,6 +29,7 @@
                                 <td>{{ cuenta.moneda }}</td>
                                 <td class="text-end">
                                     <a href="{% url 'cuentabancaria_update' cuenta.pk %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                                    <a href="{% url 'cuentabancaria_delete' cuenta.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
                                 </td>
                             </tr>
                             {% empty %}

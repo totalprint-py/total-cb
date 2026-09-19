@@ -28,6 +28,7 @@ FECHA = date(2026, 9, 5)
 NOMBRE_URL_LIBRO = "libro_bancario"
 NOMBRE_URL_CREAR = "libro_bancario_crear"
 NOMBRE_URL_RECALCULAR = "libro_bancario_recalcular"
+NOMBRE_URL_EDITAR = "movimientolibro_update"
 
 
 def _crear_cuenta_bancaria(banco, tipo_cuenta, moneda, **sobrescribir):
@@ -158,7 +159,7 @@ class TestLibroBancarioCrear:
         assert respuesta.status_code == 302
         assert respuesta.url == f"/libro-bancario/?cuenta={cuenta.pk}"
         movimiento = MovimientoLibro.objects.get(cuenta=cuenta)
-        assert movimiento.saldo == Decimal("750.00")
+        assert movimiento.saldo == Decimal("1250.00")
 
     @pytest.mark.django_db
     def test_post_formulario_invalido_rerenderiza_con_errores(self, client, cuenta, tipo_operacion):
@@ -215,8 +216,8 @@ class TestLibroBancarioRecalcular:
         assert respuesta.status_code == 302
         primero.refresh_from_db()
         segundo.refresh_from_db()
-        assert primero.saldo == Decimal("900.00")
-        assert segundo.saldo == Decimal("700.00")
+        assert primero.saldo == Decimal("1100.00")
+        assert segundo.saldo == Decimal("1300.00")
 
     @pytest.mark.django_db
     def test_post_cuenta_inexistente_devuelve_404(self, client):
@@ -231,6 +232,84 @@ class TestLibroBancarioRecalcular:
         """Un GET al endpoint de recálculo responde con 405 (solo POST)."""
         respuesta = client.get(reverse(NOMBRE_URL_RECALCULAR))
         assert respuesta.status_code == 405
+
+
+class TestLibroBancarioEditar:
+    """Pruebas de la vista ``movimientolibro_update`` para editar movimientos."""
+
+    @pytest.mark.django_db
+    def test_get_editar_devuelve_200_y_carga_el_formulario(
+        self, client, cuenta, tipo_operacion
+    ):
+        """Un GET carga la plantilla de edición con el movimiento a editar."""
+        movimiento = _crear_movimiento(
+            cuenta, tipo_operacion, haber=Decimal("50.00")
+        )
+        respuesta = client.get(reverse(NOMBRE_URL_EDITAR, args=[movimiento.pk]))
+
+        assert respuesta.status_code == 200
+        nombres = [plantilla.name for plantilla in respuesta.templates]
+        assert "conciliacion/movimiento_libro_form.html" in nombres
+        assert respuesta.context["form"].instance.pk == movimiento.pk
+
+    @pytest.mark.django_db
+    def test_post_editar_cambia_haber_y_recalcula_saldos(
+        self, client, cuenta, tipo_operacion
+    ):
+        """Editar el primer movimiento recalcula su saldo y el de los siguientes."""
+        primero = _crear_movimiento(
+            cuenta, tipo_operacion, haber=Decimal("50.00")
+        )
+        segundo = _crear_movimiento(
+            cuenta,
+            tipo_operacion,
+            fecha=date(2026, 9, 6),
+            debe=Decimal("100.00"),
+        )
+
+        respuesta = client.post(
+            reverse(NOMBRE_URL_EDITAR, args=[primero.pk]),
+            {
+                "fecha": FECHA.isoformat(),
+                "tipo_operacion": tipo_operacion.pk,
+                "detalle": primero.detalle,
+                "debe": "0.00",
+                "haber": "150.00",
+            },
+        )
+
+        assert respuesta.status_code == 302
+        assert respuesta.url == f"{reverse('libro_bancario')}?cuenta={cuenta.pk}"
+        primero.refresh_from_db()
+        segundo.refresh_from_db()
+        assert primero.haber == Decimal("150.00")
+        assert primero.saldo == Decimal("850.00")  # 1000 - 150
+        assert segundo.saldo == Decimal("950.00")  # 850 + 100
+
+    @pytest.mark.django_db
+    def test_post_editar_formulario_invalido_rerenderiza_con_errores(
+        self, client, cuenta, tipo_operacion
+    ):
+        """Un POST inválido re-renderiza (200) con errores y sin guardar cambios."""
+        movimiento = _crear_movimiento(
+            cuenta, tipo_operacion, haber=Decimal("50.00")
+        )
+        respuesta = client.post(
+            reverse(NOMBRE_URL_EDITAR, args=[movimiento.pk]),
+            {
+                "fecha": FECHA.isoformat(),
+                "tipo_operacion": tipo_operacion.pk,
+                "detalle": "Detalle sin importe",
+                "debe": "0.00",
+                "haber": "0.00",
+            },
+        )
+
+        assert respuesta.status_code == 200
+        assert respuesta.context["form"].errors
+        movimiento.refresh_from_db()
+        # El importe original no se modificó al fallar la validación.
+        assert movimiento.haber == Decimal("50.00")
 
 
 # ---------------------------------------------------------------------------

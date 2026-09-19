@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block titulo %}Reporte del Libro Bancario{% endblock %}
+
+{% block contenido %}
+<link rel="stylesheet" href="{% static 'css/print.css' %}">
+
+<div class="no-print d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+        <h1 class="h2 fw-semibold mb-1">Reporte del Libro Bancario</h1>
+        <p class="text-secondary mb-0">Seleccione una cuenta y un rango de fechas inclusivo.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <button type="button" onclick="imprimirPdf('{% url 'reporte_libro_pdf' %}?cuenta={{ reporte.cuenta.pk }}&desde={{ reporte.fecha_desde|date:'Y-m-d' }}&hasta={{ reporte.fecha_hasta|date:'Y-m-d' }}', 'reporte_libro.pdf')" class="btn btn-outline-secondary">Imprimir</button>
+    </div>
+</div>
+
+<form method="get" action="{% url 'reporte_libro' %}" class="no-print card shadow-sm mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label for="{{ form.cuenta.id_for_label }}" class="form-label fw-bold">Cuenta</label>
+                {{ form.cuenta }}
+                {% if form.cuenta.errors %}<div class="text-danger small">{{ form.cuenta.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-3">
+                <label for="{{ form.desde.id_for_label }}" class="form-label fw-bold">Desde</label>
+                {{ form.desde }}
+                {% if form.desde.errors %}<div class="text-danger small">{{ form.desde.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-3">
+                <label for="{{ form.hasta.id_for_label }}" class="form-label fw-bold">Hasta</label>
+                {{ form.hasta }}
+                {% if form.hasta.errors %}<div class="text-danger small">{{ form.hasta.errors|join:", " }}</div>{% endif %}
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">Generar reporte</button>
+            </div>
+        </div>
+        {% if form.non_field_errors %}
+        <div class="text-danger small mt-2">{{ form.non_field_errors|join:", " }}</div>
+        {% endif %}
+    </div>
+</form>
+
+{% if reporte %}
+<div class="card shadow-sm print-card">
+    <div class="card-header bg-white py-3">
+        <h2 class="h5 fw-semibold mb-1">Senda S.R.L. — Libro Bancario</h2>
+        <p class="text-muted small mb-0">
+            Cuenta: {{ reporte.cuenta.denominacion }} ({{ reporte.cuenta.numero_cuenta }})
+            — Periodo: {{ reporte.fecha_desde|date:"d/m/Y" }} al {{ reporte.fecha_hasta|date:"d/m/Y" }}
+        </p>
+        <p class="fw-semibold mb-0">Saldo Anterior: {{ reporte.saldo_inicial_periodo }}</p>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Detalle</th>
+                    <th class="text-end">Debe</th>
+                    <th class="text-end">Haber</th>
+                    <th class="text-end">Saldo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for movimiento in reporte.movimientos %}
+                <tr>
+                    <td>{{ movimiento.fecha|date:"d/m/Y" }}</td>
+                    <td>{{ movimiento.tipo_operacion }}</td>
+                    <td>{{ movimiento.detalle }}</td>
+                    <td class="text-end">{{ movimiento.debe }}</td>
+                    <td class="text-end">{{ movimiento.haber }}</td>
+                    <td class="text-end">{{ movimiento.saldo }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted">Sin movimientos en el rango seleccionado.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot class="table-light fw-semibold">
+                <tr>
+                    <td colspan="5" class="text-end">Saldo Anterior</td>
+                    <td class="text-end">{{ reporte.saldo_inicial_periodo }}</td>
+                </tr>
+                <tr>
+                    <td colspan="5" class="text-end">Total Debe</td>
+                    <td class="text-end">{{ reporte.total_debe }}</td>
+                </tr>
+                <tr>
+                    <td colspan="5" class="text-end">Total Haber</td>
+                    <td class="text-end">{{ reporte.total_haber }}</td>
+                </tr>
+                <tr>
+                    <td colspan="5" class="text-end">Saldo final</td>
+                    <td class="text-end">{{ reporte.saldo_final }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<script>
+function urlAbsoluta(ruta) { return new URL(ruta, window.location.origin).toString(); }
+function imprimirPdf(ruta, nombre) {
+    if (window.pywebview && window.pywebview.api) {
+        window.pywebview.api.abrir_pdf(urlAbsoluta(ruta), nombre);
+    } else {
+        window.print();
+    }
+}
+</script>
+{% endblock %}

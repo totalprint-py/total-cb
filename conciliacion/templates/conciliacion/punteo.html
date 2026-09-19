@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block titulo %}Punteo{% endblock %}
+
+{% block contenido %}
+<div x-data="punteador()">
+    <!-- Encabezado: selector de cuenta -->
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+        <div>
+            <h1 class="h2 fw-semibold mb-1">Punteo de movimientos</h1>
+            <p class="text-secondary mb-0">Seleccione un extracto y un libro para vincularlos.</p>
+        </div>
+        <form method="get" action="{% url 'punteo' %}" class="d-flex gap-2">
+            <select name="cuenta" class="form-select" onchange="this.form.submit()">
+                <option value="">— Seleccione una cuenta —</option>
+                {% for c in cuentas %}
+                <option value="{{ c.pk }}" {% if cuenta and c.pk == cuenta.pk %}selected{% endif %}>{{ c.denominacion }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <p class="small text-secondary mb-3">Importes deben coincidir exactamente.</p>
+
+    <!-- Listas de movimientos pendientes -->
+    <div class="row mb-4">
+        <div class="col-md-6 mb-3 mb-md-0">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h2 class="h6 fw-semibold mb-0">Extractos pendientes</h2>
+                </div>
+                <div class="card-body overflow-auto" style="max-height: 420px;">
+                    <ul class="list-unstyled mb-0">
+                        {% for m in extractos %}
+                        <li class="mb-2">
+                            <button type="button"
+                                    class="btn w-100 text-start"
+                                    :class="seleccion.extracto == '{{ m.pk }}' ? 'btn-primary' : 'btn-outline-secondary'"
+                                    @click="seleccion.extracto = '{{ m.pk }}'">
+                                <span class="fw-semibold d-block">{{ m.importe }}</span>
+                                <span class="small text-secondary">{{ m.fecha|date:"d/m/Y" }} — {{ m.detalle }}</span>
+                            </button>
+                        </li>
+                        {% empty %}
+                        <li class="small text-secondary">Sin extractos sin conciliar.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h2 class="h6 fw-semibold mb-0">Libros pendientes</h2>
+                </div>
+                <div class="card-body overflow-auto" style="max-height: 420px;">
+                    <ul class="list-unstyled mb-0">
+                        {% for libro in libros %}
+                        <li class="mb-2">
+                            <button type="button"
+                                    class="btn w-100 text-start"
+                                    :class="seleccion.libro == '{{ libro.pk }}' ? 'btn-primary' : 'btn-outline-secondary'"
+                                    @click="seleccion.libro = '{{ libro.pk }}'">
+                                <span class="fw-semibold d-block">{% if libro.debe %}{{ libro.debe }}{% else %}-{{ libro.haber }}{% endif %}</span>
+                                <span class="small text-secondary">{{ libro.fecha|date:"d/m/Y" }} — {{ libro.detalle }}</span>
+                            </button>
+                        </li>
+                        {% empty %}
+                        <li class="small text-secondary">Sin libros sin conciliar.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form method="post" action="{% url 'puntear' %}" class="card shadow-sm">
+        <div class="card-body">
+            {% csrf_token %}
+            <input type="hidden" name="extracto_id" :value="seleccion.extracto">
+            <input type="hidden" name="libro_id" :value="seleccion.libro">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h2 class="h6 fw-semibold mb-1">Acción de punteo</h2>
+                    <p x-show="!seleccion.extracto || !seleccion.libro" class="small text-secondary mb-0">
+                        Seleccione un extracto y un libro para puntearlos.
+                    </p>
+                    <p x-show="seleccion.extracto && seleccion.libro" class="small text-secondary mb-0">
+                        Movimientos listos para puntear.
+                    </p>
+                </div>
+                <div class="col-md-4 mt-3 mt-md-0">
+                    <button type="submit"
+                            class="btn btn-primary btn-lg w-100"
+                            :disabled="!seleccion.extracto || !seleccion.libro">
+                        Puntear seleccionados
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+    function punteador() {
+        return {
+            seleccion: { extracto: null, libro: null }
+        };
+    }
+</script>
+{% endblock %}

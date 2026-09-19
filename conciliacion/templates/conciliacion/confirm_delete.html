@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block titulo %}Confirmar eliminación{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+    <div class="col-lg-6 col-xl-5">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-danger text-white fw-bold py-3">Confirmar eliminación</div>
+            <div class="card-body">
+                <p class="mb-4">
+                    ¿Está seguro de que desea eliminar <strong>«{{ object }}»</strong>?
+                    Esta acción no se puede deshacer.
+                </p>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="d-flex justify-content-end gap-2">
+                        <a href="{{ cancel_url }}" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-danger">Sí, eliminar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

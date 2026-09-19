@@ -84,3 +84,71 @@ class TestMovimientoLibroFormClean:
             }
         )
         assert form.is_valid()
+
+    @pytest.mark.django_db
+    def test_acepta_formato_regional_en_importe(self, tipo_operacion_factory):
+        """Un importe en formato regional (1.500,50) se interpreta correctamente."""
+        tipo_operacion = tipo_operacion_factory()
+        form = MovimientoLibroForm(
+            data={
+                "fecha": FECHA.isoformat(),
+                "tipo_operacion": tipo_operacion.pk,
+                "detalle": "Importe localizado",
+                "debe": "1.500,50",
+                "haber": "0,00",
+            }
+        )
+        assert form.is_valid()
+        assert form.cleaned_data["debe"] == Decimal("1500.50")
+        assert form.cleaned_data["haber"] == Decimal("0.00")
+
+    @pytest.mark.django_db
+    def test_haber_vacio_se_completa_con_cero(self, tipo_operacion_factory):
+        """Un ``haber`` vacío (con ``debe`` positivo) es válido y se completa con 0.00."""
+        tipo_operacion = tipo_operacion_factory()
+        form = MovimientoLibroForm(
+            data={
+                "fecha": FECHA.isoformat(),
+                "tipo_operacion": tipo_operacion.pk,
+                "detalle": "Depósito sin haber",
+                "debe": "100.00",
+                "haber": "",
+            }
+        )
+        assert form.is_valid()
+        assert form.cleaned_data["haber"] == Decimal("0.00")
+
+    @pytest.mark.django_db
+    def test_debe_vacio_se_completa_con_cero(self, tipo_operacion_factory):
+        """Un ``debe`` vacío (con ``haber`` positivo) es válido y se completa con 0.00."""
+        tipo_operacion = tipo_operacion_factory()
+        form = MovimientoLibroForm(
+            data={
+                "fecha": FECHA.isoformat(),
+                "tipo_operacion": tipo_operacion.pk,
+                "detalle": "Crédito sin debe",
+                "debe": "",
+                "haber": "50.00",
+            }
+        )
+        assert form.is_valid()
+        assert form.cleaned_data["debe"] == Decimal("0.00")
+
+    @pytest.mark.django_db
+    def test_debe_y_haber_positivos_son_invalidos(self, tipo_operacion_factory):
+        """Cargar importes positivos en ``debe`` y ``haber`` a la vez es inválido."""
+        tipo_operacion = tipo_operacion_factory()
+        form = MovimientoLibroForm(
+            data={
+                "fecha": FECHA.isoformat(),
+                "tipo_operacion": tipo_operacion.pk,
+                "detalle": "Movimiento ambiguo",
+                "debe": "100.00",
+                "haber": "50.00",
+            }
+        )
+        assert not form.is_valid()
+        assert (
+            "Solo puede cargar un valor en Debe o en Haber, no en ambos."
+            in form.non_field_errors()
+        )

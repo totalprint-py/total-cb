@@ -25,6 +25,7 @@
                                 <td>{{ tipo_cuenta.nombre }}</td>
                                 <td class="text-end">
                                     <a href="{% url 'tipocuenta_update' tipo_cuenta.pk %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                                    <a href="{% url 'tipocuenta_delete' tipo_cuenta.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
                                 </td>
                             </tr>
                             {% empty %}

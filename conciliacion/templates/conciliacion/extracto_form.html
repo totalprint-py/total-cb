@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block titulo %}Movimiento de Extracto{% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+    <div class="col-lg-6 col-xl-5">
+        <div class="card shadow border-0">
+            <div class="card-header bg-primary text-white fw-bold py-3">Movimiento del extracto</div>
+            <div class="card-body bg-light">
+                <form method="post">
+                    {% csrf_token %}
+                    {% include "conciliacion/_campos_formulario.html" %}
+                    <div class="d-flex justify-content-between gap-2 mt-3">
+                        <a href="{% url 'extracto_list' %}" class="btn btn-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-primary">Guardar movimiento</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

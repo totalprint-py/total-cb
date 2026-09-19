@@ -106,3 +106,17 @@ class TestMovimientoLibroFullClean:
             haber=Decimal("0.00"),
         )
         movimiento.full_clean()  # no debe lanzar ValidationError
+
+    @pytest.mark.django_db
+    def test_debe_y_haber_positivos_es_invalido(self, cuenta, tipo_operacion):
+        """Un movimiento con ``debe`` y ``haber`` positivos debe lanzar ``ValidationError``."""
+        movimiento = MovimientoLibro(
+            cuenta=cuenta,
+            fecha=FECHA,
+            tipo_operacion=tipo_operacion,
+            detalle="Movimiento ambiguo",
+            debe=Decimal("100.00"),
+            haber=Decimal("50.00"),
+        )
+        with pytest.raises(ValidationError):
+            movimiento.full_clean()

@@ -1,96 +1,157 @@
-"""Punto de entrada del ejecutable empaquetado con PyInstaller.
+"""Punto de entrada del ejecutable de escritorio (PyInstaller + Waitress + pywebview).
 
-Este módulo sustituye a ``manage.py runserver`` en el entorno de escritorio:
-configura Django, abre el navegador predeterminado en la URL local y arranca
-el servidor de desarrollo en segundo plano.
+Arranca la aplicación Django dentro de una ventana nativa de escritorio (kiosk),
+sin controles de navegador:
+
+1. Fija ``DJANGO_SETTINGS_MODULE`` ANTES de tocar Django.
+2. Siembra la base SQLite de trabajo (``%LOCALAPPDATA%\\total-cb\\db.sqlite3``)
+   con el ``db.sqlite3`` empaquetado si aún no existe, de modo que la aplicación
+   arranque con los datos reales y no en blanco.
+3. Inicializa Django y aplica las migraciones pendientes.
+4. Sirve la aplicación WSGI con Waitress en un ``threading.Thread(daemon=True)``.
+5. Abre ``http://127.0.0.1:8000`` en una ventana nativa mediante ``pywebview``
+   (WebView2/Chromium en Windows) y ejecuta el bucle de UI en el hilo principal.
 """
 
 import os
-import subprocess
+import shutil
 import sys
+import tempfile
 import threading
-import webbrowser
+import traceback
+import urllib.request
+from pathlib import Path
 
-# Establecer el módulo de configuración ANTES de cargar Django para que
-# ``django.setup()`` y ``execute_from_command_line`` lo resuelvan correctamente.
-os.environ["DJANGO_SETTINGS_MODULE"] = "totalcb.settings"
+# 1) Configuración ANTES de importar/ejecutar Django.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "totalcb.settings")
 
 import django
 from django.core.management import execute_from_command_line
 
-# Al compilar el ejecutable con ``--noconsole``, PyInstaller deja ``sys.stdout``
-# y ``sys.stderr`` en ``None``: cualquier ``print`` o log que intente escribir en
-# ellos lanzaría ``AttributeError``. Se redirigen a ``os.devnull`` para descartar
-# la salida de forma segura.
+from totalcb import paths
+
+# Con ``--noconsole`` PyInstaller deja ``sys.stdout``/``sys.stderr`` en ``None``;
+# redirigirlos a ``os.devnull`` evita ``AttributeError`` al imprimir o loguear.
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
-# URL local donde se sirve la aplicación.
-URL_APLICACION = "http://127.0.0.1:8002/"
-
-# Retardo (en segundos) para abrir el navegador y dar tiempo al servidor a
-# empezar a escuchar antes de cargar la página.
-RETARDO_NAVEGADOR = 1.5
+HOST = "127.0.0.1"
+PORT = 8000
+URL = f"http://{HOST}:{PORT}/"
+WINDOW_TITLE = "Senda S.R.L. - Libro Bancario"
 
 
-def abrir_navegador() -> None:
-    """Abre la aplicación con apariencia de app nativa (sin barras ni menús).
+def _candidatos_semilla():
+    """Candidatos (en orden) de dónde copiar el ``db.sqlite3`` de arranque."""
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent  # dist/SENDA_Bancario/
+        candidatos = [exe_dir / "db.sqlite3"]
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidatos.append(Path(meipass) / "db.sqlite3")
+        return candidatos
+    return [paths.BASE_DIR / "db.sqlite3"]
 
-    Busca Microsoft Edge y Google Chrome en las rutas de instalación estándar de
-    Windows y, si encuentra alguno, lo lanza en modo ``--app`` maximizado. Si no
-    hay ningún navegador soportado, recurre al navegador predeterminado.
-    """
-    url = "http://127.0.0.1:8002/"
 
-    # Directorios estándar de instalación en Windows. Se obtienen de las
-    # variables de entorno y se usan las rutas clásicas como respaldo.
-    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-    program_files_x86 = os.environ.get(
-        "ProgramFiles(x86)", r"C:\Program Files (x86)"
-    )
+def _sembrar_base_de_datos():
+    """Copia la base empaquetada a ``%LOCALAPPDATA%\\total-cb\\db.sqlite3``."""
+    destino = Path(paths.database_path())
+    if destino.exists():
+        return
 
-    # Rutas de los ejecutables de Edge y Chrome en ambos directorios.
-    rutas_navegadores = [
-        # Microsoft Edge
-        os.path.join(program_files, "Microsoft", "Edge", "Application", "msedge.exe"),
-        os.path.join(program_files_x86, "Microsoft", "Edge", "Application", "msedge.exe"),
-        # Google Chrome
-        os.path.join(program_files, "Google", "Chrome", "Application", "chrome.exe"),
-        os.path.join(program_files_x86, "Google", "Chrome", "Application", "chrome.exe"),
-    ]
-
-    for ruta in rutas_navegadores:
-        if os.path.isfile(ruta):
-            # ``--app`` oculta menús y barras de navegación; ``--start-maximized``
-            # abre la ventana maximizada para simular una aplicación de escritorio.
-            subprocess.Popen([ruta, f"--app={url}", "--start-maximized"])
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    for fuente in _candidatos_semilla():
+        if fuente.is_file():
+            shutil.copy2(str(fuente), str(destino))
+            print(f"Base de datos sembrada desde: {fuente}")
             return
 
-    # Respaldo: abrir con el navegador predeterminado del sistema.
-    webbrowser.open(url)
+    # Sin semilla: ``migrate`` más abajo creará un esquema vacío.
+    print("Aviso: no se encontró db.sqlite3 empaquetado; se creará una base vacía.")
 
 
-def main() -> None:
-    """Configura Django, abre el navegador y arranca el servidor local."""
-    # Inicializar el registro de aplicaciones y la configuración de Django.
+def _servir():
+    """Sirve la aplicación WSGI con Waitress (hilo en segundo plano)."""
+    from waitress import serve
+
+    from totalcb.wsgi import application
+
+    serve(application, host=HOST, port=PORT, threads=8)
+
+
+def _registrar_error(exc):
+    """Escribe el traceback a un archivo de diagnóstico (no hay consola en kiosk)."""
+    try:
+        log = Path(paths.data_dir()) / "app_error.log"
+        log.write_text("".join(traceback.format_exception(exc)), encoding="utf-8")
+    except Exception:
+        pass
+
+
+class ApiEscritorio:
+    def _descargar(self, url):
+        return urllib.request.urlopen(url, timeout=60).read()
+
+    def guardar_archivo(self, url, nombre):
+        try:
+            datos = self._descargar(url)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        ventana = webview.windows[0]
+        rutas = ventana.create_file_dialog(
+            webview.FileDialog.SAVE, save_filename=nombre
+        )
+        if not rutas:
+            return {"ok": False, "cancelado": True}
+        ruta = rutas[0] if isinstance(rutas, (list, tuple)) else str(rutas)
+        Path(ruta).write_bytes(datos)
+        return {"ok": True, "ruta": ruta}
+
+    def abrir_pdf(self, url, nombre):
+        try:
+            datos = self._descargar(url)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        destino = Path(tempfile.gettempdir()) / nombre
+        destino.write_bytes(datos)
+        os.startfile(str(destino))
+        return {"ok": True, "ruta": str(destino)}
+
+
+def main():
+    # 2) Sembrar la base de datos ANTES de inicializar Django.
+    _sembrar_base_de_datos()
+
+    # 3) Inicializar Django y aplicar migraciones pendientes.
     django.setup()
+    execute_from_command_line(["main.py", "migrate", "--noinput"])
 
-    # Auto-aplicar migraciones para crear la DB si no existe o esta vacia
-    execute_from_command_line(["main.py", "migrate"])
+    # 4) Servir con Waitress en un hilo daemon (se detiene al cerrar la ventana).
+    threading.Thread(target=_servir, daemon=True, name="waitress").start()
 
-    # Programar la apertura del navegador en un hilo separado para no bloquear
-    # el arranque del servidor y evitar que el navegador cargue antes de que
-    # ``runserver`` esté escuchando.
-    threading.Timer(RETARDO_NAVEGADOR, abrir_navegador).start()
+    # 5) Abrir la ventana nativa (kiosk) y ejecutar el bucle de UI.
+    import webview
 
-    # ``--noreload`` es obligatorio en un ejecutable congelado: el recargador
-    # automático lanza subprocesos que no existen dentro del paquete .exe.
-    execute_from_command_line(
-        ["main.py", "runserver", "127.0.0.1:8002", "--noreload"]
+    webview.create_window(
+        WINDOW_TITLE,
+        URL,
+        width=1280,
+        height=800,
+        min_size=(800, 560),
+        js_api=ApiEscritorio(),
     )
+    webview.start()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        _registrar_error(exc)
+        if sys.stdin is not None:
+            try:
+                input("Ocurrió un error. Presione Enter para salir...")
+            except (EOFError, OSError):
+                pass

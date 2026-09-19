@@ -44,3 +44,8 @@ desktop.ini
 *.xls
 *.doc
 *.docx
+# Logs de diagnóstico de la ventana desktop
+*.log
+# Artefactos de PyInstaller (regenerables)
+*.spec
+

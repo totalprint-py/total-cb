@@ -25,6 +25,7 @@
                                 <td>{{ concepto_ajuste.nombre }}</td>
                                 <td class="text-end">
                                     <a href="{% url 'conceptoajuste_update' concepto_ajuste.pk %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                                    <a href="{% url 'conceptoajuste_delete' concepto_ajuste.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
                                 </td>
                             </tr>
                             {% empty %}

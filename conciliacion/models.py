@@ -16,10 +16,16 @@ Las restricciones de dominio se declaran con ``CheckConstraint(condition=Q(...))
 y los pares únicos con ``UniqueConstraint``. Los modelos son exclusivamente
 estructuras de datos: sin lógica de negocio.
 """
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.db.models.constraints import CheckConstraint, UniqueConstraint
+
+
+class ConciliadoBloqueadoError(Exception):
+    """Un movimiento conciliado no puede editarse ni eliminarse."""
 
 
 # ---------------------------------------------------------------------------
@@ -201,13 +207,13 @@ class LoteImportacion(models.Model):
 class CuentaBancaria(models.Model):
     """Cuenta bancaria sujeta a conciliación."""
 
-    banco = models.ForeignKey(Banco, on_delete=models.CASCADE)
-    tipo_cuenta = models.ForeignKey(TipoCuenta, on_delete=models.CASCADE)
-    moneda = models.ForeignKey(Moneda, on_delete=models.CASCADE)
+    banco = models.ForeignKey(Banco, on_delete=models.PROTECT)
+    tipo_cuenta = models.ForeignKey(TipoCuenta, on_delete=models.PROTECT)
+    moneda = models.ForeignKey(Moneda, on_delete=models.PROTECT)
     numero_cuenta = models.CharField(max_length=50)
     denominacion = models.CharField(max_length=100, help_text="Ej: GNB Dólares")
     saldo_inicial = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0.00
+        max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
 
     class Meta:
@@ -288,17 +294,21 @@ class MovimientoLibro(models.Model):
 
     Cada movimiento ajusta el saldo de la cuenta partiendo del saldo del
     movimiento cronológico anterior (o del ``saldo_inicial`` de la cuenta si es
-    el primero). La convención es ``saldo = saldo_base - debe + haber``.
+    el primero). La convención es ``saldo = saldo_base + debe - haber``.
     """
 
     cuenta = models.ForeignKey(CuentaBancaria, on_delete=models.CASCADE)
     fecha = models.DateField()
     tipo_operacion = models.ForeignKey(TipoOperacion, on_delete=models.PROTECT)
     detalle = models.CharField(max_length=255)
-    debe = models.DecimalField(max_digits=18, decimal_places=2, default=0.00)
-    haber = models.DecimalField(max_digits=18, decimal_places=2, default=0.00)
+    debe = models.DecimalField(
+        max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
+    haber = models.DecimalField(
+        max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
     saldo = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0.00, editable=False
+        max_digits=18, decimal_places=2, default=Decimal("0.00"), editable=False
     )
     conciliado = models.BooleanField(default=False)
 
@@ -317,6 +327,10 @@ class MovimientoLibro(models.Model):
                 condition=Q(debe__gt=0) | Q(haber__gt=0),
                 name="movimiento_libro_importe_requerido",
             ),
+            CheckConstraint(
+                condition=Q(debe=0) | Q(haber=0),
+                name="movimiento_libro_mutua_exclusion",
+            ),
         ]
         verbose_name = "movimiento de libro"
         verbose_name_plural = "movimientos de libro"
@@ -325,7 +339,8 @@ class MovimientoLibro(models.Model):
         return f"{self.fecha} - {self.detalle}"
 
     def clean(self):
-        """Valida FR-007 en el modelo: importes no negativos y al menos uno no cero."""
+        """Valida FR-007 en el modelo: importes no negativos, al menos uno no
+        cero y exclusión mutua entre ``debe`` y ``haber``."""
         super().clean()
         errores = {}
         if self.debe is not None and self.debe < 0:
@@ -337,6 +352,15 @@ class MovimientoLibro(models.Model):
         ):
             raise ValidationError(
                 "Debe indicar un importe en el debe o en el haber."
+            )
+        if (
+            self.debe is not None
+            and self.haber is not None
+            and self.debe > 0
+            and self.haber > 0
+        ):
+            raise ValidationError(
+                "Solo puede cargar un valor en Debe o en Haber, no en ambos."
             )
         if errores:
             raise ValidationError(errores)
@@ -352,8 +376,23 @@ class MovimientoLibro(models.Model):
                 saldo_base = last_mov.saldo
             else:
                 saldo_base = self.cuenta.saldo_inicial
-            self.saldo = saldo_base - self.debe + self.haber
+            self.saldo = saldo_base + self.debe - self.haber
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """Elimina el movimiento y recalcula los saldos corridos restantes.
+
+        Al borrar un movimiento intermedio, los movimientos posteriores deben
+        recalcular su saldo para mantener la coherencia del libro mayor.
+        """
+        if self.conciliado:
+            raise ConciliadoBloqueadoError(
+                "El movimiento conciliado no puede editarse ni eliminarse."
+            )
+        cuenta_id = self.cuenta_id
+        resultado = super().delete(*args, **kwargs)
+        type(self).recalcular_saldos(cuenta_id)
+        return resultado
 
     @classmethod
     def recalcular_saldos(cls, cuenta_id):
@@ -369,7 +408,7 @@ class MovimientoLibro(models.Model):
             cls.objects.filter(cuenta_id=cuenta_id).order_by("fecha", "id")
         )
         for movimiento in movimientos:
-            movimiento.saldo = saldo_base - movimiento.debe + movimiento.haber
+            movimiento.saldo = saldo_base + movimiento.debe - movimiento.haber
             movimiento.save(update_fields=["saldo"])
             saldo_base = movimiento.saldo
         return movimientos
@@ -467,4 +506,125 @@ class AjusteConciliacion(models.Model):
 
     def __str__(self):
         return f"{self.concepto_ajuste} - {self.importe}"
+
+
+# ---------------------------------------------------------------------------
+# Conciliación bancaria: extracto y punteo (Fase 4).
+# ---------------------------------------------------------------------------
+
+
+class MovimientoExtracto(models.Model):
+    """Movimiento financiero proveniente del extracto bancario."""
+
+    ORIGEN_MANUAL = "manual"
+    ORIGEN_IMPORTACION = "importacion"
+    ORIGENES = [
+        (ORIGEN_MANUAL, "Manual"),
+        (ORIGEN_IMPORTACION, "Importación"),
+    ]
+
+    cuenta_bancaria = models.ForeignKey(
+        CuentaBancaria,
+        on_delete=models.PROTECT,
+        related_name="movimientos_extracto",
+    )
+    fecha = models.DateField()
+    referencia = models.CharField(max_length=100, blank=True)
+    detalle = models.CharField(max_length=255)
+    importe = ImporteDecimalField(max_digits=18, decimal_places=2)
+    origen = models.CharField(
+        max_length=20, choices=ORIGENES, default=ORIGEN_MANUAL
+    )
+    conciliado = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["fecha", "id"]
+        constraints = [
+            CheckConstraint(
+                condition=Q(importe__lt=0) | Q(importe__gt=0),
+                name="movimiento_extracto_importe_no_cero",
+            ),
+            CheckConstraint(
+                condition=Q(origen__in=["manual", "importacion"]),
+                name="movimiento_extracto_origen_valido",
+            ),
+        ]
+        verbose_name = "movimiento de extracto"
+        verbose_name_plural = "movimientos de extracto"
+
+    def __str__(self):
+        return f"{self.fecha} - {self.detalle}"
+
+    def delete(self, *args, **kwargs):
+        if self.conciliado:
+            raise ConciliadoBloqueadoError(
+                "El movimiento conciliado no puede editarse ni eliminarse."
+            )
+        return super().delete(*args, **kwargs)
+
+
+class Punteo(models.Model):
+    """Vínculo 1:1 entre un movimiento de extracto y uno del libro mayor."""
+
+    movimiento_extracto = models.ForeignKey(
+        MovimientoExtracto,
+        on_delete=models.PROTECT,
+        related_name="punteo",
+    )
+    movimiento_libro = models.ForeignKey(
+        MovimientoLibro,
+        on_delete=models.PROTECT,
+        related_name="punteo",
+    )
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=["movimiento_extracto"],
+                name="punteo_movimiento_extracto_unico",
+            ),
+            UniqueConstraint(
+                fields=["movimiento_libro"],
+                name="punteo_movimiento_libro_unico",
+            ),
+        ]
+        verbose_name = "punteo"
+        verbose_name_plural = "punteos"
+
+    def __str__(self):
+        return f"{self.movimiento_extracto} - {self.movimiento_libro}"
+
+
+class AuditoriaPunteo(models.Model):
+    """Bitácora de las transiciones de punteo y despunteo (FR-007)."""
+
+    ACCION_PUNTEAR = "puntear"
+    ACCION_DESPUNTEAR = "despuntear"
+    ACCIONES = [
+        (ACCION_PUNTEAR, "Puntear"),
+        (ACCION_DESPUNTEAR, "Despuntear"),
+    ]
+
+    fecha_hora = models.DateTimeField(auto_now_add=True)
+    accion = models.CharField(max_length=20, choices=ACCIONES)
+    movimiento_extracto = models.ForeignKey(
+        MovimientoExtracto, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    movimiento_libro = models.ForeignKey(
+        MovimientoLibro, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    usuario = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        constraints = [
+            CheckConstraint(
+                condition=Q(accion__in=["puntear", "despuntear"]),
+                name="auditoria_punteo_accion_valida",
+            ),
+        ]
+        verbose_name = "auditoría de punteo"
+        verbose_name_plural = "auditorías de punteo"
+
+    def __str__(self):
+        return f"{self.fecha_hora} - {self.accion}"
 

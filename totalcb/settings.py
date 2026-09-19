@@ -51,6 +51,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Sirve los estáticos en producción/empaquetado: Waitress no sirve estáticos,
+    # así que WhiteNoise los entrega a través del WSGI application desde STATIC_ROOT.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -119,6 +122,26 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
+
+# --- Localización numérica regional (España/Paraguay) -----------------------
+# Formato requerido para la UI financiera:
+#   * Separador de millares: "."  →  1.500,50
+#   * Separador decimal:     ","  →  1.500,50
+#   * Agrupación de 3 dígitos.
+#
+# ``USE_L10N`` fue eliminado en Django 5.0: cuando ``USE_I18N = True`` la
+# localización de formato está siempre activa, por lo que no es necesario
+# declararlo.
+USE_THOUSAND_SEPARATOR = True
+NUMBER_GROUPING = 3
+DECIMAL_SEPARATOR = ','
+THOUSAND_SEPARATOR = '.'
+
+# El módulo de formato ``es`` de Django usa un espacio de no separación como
+# separador de millares en lugar de ".". Para garantizar el separador regional
+# exacto se registra un módulo de formato propio, con prioridad sobre el de la
+# distribución (las claves no definidas siguen resolviéndose por el estándar).
+FORMAT_MODULE_PATH = ['totalcb.formats']
 
 
 # Static files (CSS, JavaScript, Images)

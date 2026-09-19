@@ -6,3 +6,17 @@ pytest-django>=4.8
 # Herramienta para empaquetar la aplicación en un ejecutable de Windows (.exe).
 # Se requiere >= 6.16 para ser compatible con Python 3.14.
 pyinstaller>=6.16
+# Exportación de reportes del Libro Bancario (Principio 4): dependencias puras
+# en Python, seguras para PyInstaller. fpdf2 genera PDF; openpyxl genera XLSX.
+fpdf2>=2.8
+openpyxl>=3.1
+# --- Empaquetado de escritorio (PyInstaller + Waitress + WhiteNoise) ----------
+# ``waitress``: servidor WSGI de producción que sirve la aplicación empaquetada.
+# ``whitenoise``: sirve los estáticos (Bootstrap/Tailwind/Alpine + admin) a través
+# del WSGI application, ya que Waitress no sirve archivos estáticos por sí solo.
+waitress>=3.0
+whitenoise>=6.9
+# --- Ventana de escritorio nativa (kiosk) -----------------------------------
+# ``pywebview`` abre la aplicación en una ventana nativa (motor WebView2/Chromium
+# en Windows) sin controles de navegador. En Windows arrastra ``pythonnet``.
+pywebview>=6.0

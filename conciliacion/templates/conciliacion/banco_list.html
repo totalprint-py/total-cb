@@ -25,6 +25,7 @@
                                 <td>{{ banco.nombre }}</td>
                                 <td class="text-end">
                                     <a href="{% url 'banco_update' banco.pk %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                                    <a href="{% url 'banco_delete' banco.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
                                 </td>
                             </tr>
                             {% empty %}

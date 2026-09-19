@@ -25,6 +25,7 @@
                                 <td>{{ tipo_operacion.nombre }}</td>
                                 <td class="text-end">
                                     <a href="{% url 'tipooperacion_update' tipo_operacion.pk %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                                    <a href="{% url 'tipooperacion_delete' tipo_operacion.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
                                 </td>
                             </tr>
                             {% empty %}

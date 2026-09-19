@@ -7,6 +7,8 @@ editables y sus etiquetas en español.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from django import forms
 
 from conciliacion.models import (
@@ -15,6 +17,7 @@ from conciliacion.models import (
     CuentaBancaria,
     Moneda,
     MovimientoBancario,
+    MovimientoExtracto,
     MovimientoInterno,
     MovimientoLibro,
     TipoCuenta,
@@ -103,6 +106,15 @@ class ConceptoAjusteForm(forms.ModelForm):
 class CuentaBancariaForm(forms.ModelForm):
     """Formulario para las cuentas bancarias."""
 
+    saldo_inicial = forms.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        localize=True,
+        widget=forms.TextInput(
+            attrs={"class": CLASES_CAMPO, "inputmode": "decimal"}
+        ),
+    )
+
     class Meta:
         model = CuentaBancaria
         fields = [
@@ -127,14 +139,30 @@ class CuentaBancariaForm(forms.ModelForm):
             "moneda": forms.Select(attrs={"class": "form-select"}),
             "numero_cuenta": forms.TextInput(attrs={"class": CLASES_CAMPO}),
             "denominacion": forms.TextInput(attrs={"class": CLASES_CAMPO}),
-            "saldo_inicial": forms.NumberInput(
-                attrs={"class": CLASES_CAMPO, "step": "0.01"}
-            ),
         }
 
 
 class MovimientoLibroForm(forms.ModelForm):
     """Formulario para registrar un movimiento del libro mayor."""
+
+    debe = forms.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        localize=True,
+        required=False,
+        widget=forms.TextInput(
+            attrs={"class": CLASES_CAMPO, "inputmode": "decimal"}
+        ),
+    )
+    haber = forms.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        localize=True,
+        required=False,
+        widget=forms.TextInput(
+            attrs={"class": CLASES_CAMPO, "inputmode": "decimal"}
+        ),
+    )
 
     class Meta:
         model = MovimientoLibro
@@ -148,42 +176,166 @@ class MovimientoLibroForm(forms.ModelForm):
         }
         widgets = {
             "fecha": forms.DateInput(
-                attrs={"class": CLASES_CAMPO, "type": "date", "autofocus": "autofocus"}
+                format="%Y-%m-%d",
+                attrs={"class": CLASES_CAMPO, "type": "date", "autofocus": "autofocus"},
             ),
             "tipo_operacion": forms.Select(attrs={"class": "form-select"}),
             "detalle": forms.TextInput(attrs={"class": CLASES_CAMPO}),
-            "debe": forms.NumberInput(
-                attrs={"class": CLASES_CAMPO, "step": "0.01", "inputmode": "decimal"}
-            ),
-            "haber": forms.NumberInput(
-                attrs={"class": CLASES_CAMPO, "step": "0.01", "inputmode": "decimal"}
-            ),
         }
 
     def clean(self):
-        """Valida FR-007: importes no negativos y al menos uno no cero."""
+        """Valida FR-007: importes no negativos, al menos uno no cero y
+        exclusión mutua entre ``debe`` y ``haber``.
+
+        Los importes en blanco se interpretan como ``0.00`` (campos
+        ``required=False``) para permitir cargar el movimiento indicando una
+        sola de las dos columnas.
+        """
         cleaned_data = super().clean()
         debe = cleaned_data.get("debe")
         haber = cleaned_data.get("haber")
 
-        if debe is not None and debe < 0:
+        # Los campos en blanco llegan como ``None`` a ``cleaned_data``; se
+        # convierten a ``0.00``. Si un campo no está presente en ``cleaned_data``
+        # es porque ``super().clean()`` ya registró un error de conversión.
+        for nombre in ("debe", "haber"):
+            if nombre in cleaned_data and cleaned_data[nombre] is None:
+                cleaned_data[nombre] = Decimal("0.00")
+
+        debe = cleaned_data.get("debe")
+        haber = cleaned_data.get("haber")
+        if debe is None or haber is None:
+            return cleaned_data
+
+        if debe < 0:
             self.add_error("debe", "El debe no puede ser negativo.")
-        if haber is not None and haber < 0:
+        if haber < 0:
             self.add_error("haber", "El haber no puede ser negativo.")
 
-        # Solo verificar "ambos en cero" si ambos están presentes y no son negativos
-        if (
-            debe is not None
-            and haber is not None
-            and debe >= 0
-            and haber >= 0
-            and debe == 0
-            and haber == 0
-        ):
+        # Solo verificar "ambos en cero" si ambos no son negativos.
+        if debe >= 0 and haber >= 0 and debe == 0 and haber == 0:
             raise forms.ValidationError(
                 "Debe indicar un importe en el debe o en el haber."
             )
 
+        # Exclusión mutua: no puede haber importe positivo en ambas columnas.
+        if debe > 0 and haber > 0:
+            raise forms.ValidationError(
+                "Solo puede cargar un valor en Debe o en Haber, no en ambos."
+            )
+
+        return cleaned_data
+
+
+class CrearAsientoExtractoForm(forms.ModelForm):
+    """Formulario de solo lectura para convertir un extracto en asiento.
+
+    ``debe``/``haber`` vienen precargados con el signo ya mapeado desde la
+    vista; el usuario confirma y el POST invoca ``crear_asiento_desde_extracto``.
+    """
+
+    class Meta:
+        model = MovimientoLibro
+        fields = ["fecha", "detalle", "debe", "haber"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for campo in self.fields.values():
+            campo.disabled = True
+
+
+class ExtractoImportarForm(forms.Form):
+    """Formulario de carga de extractos bancarios (``cuenta`` + ``archivo``)."""
+
+    cuenta = forms.ModelChoiceField(
+        queryset=CuentaBancaria.objects.all(),
+        label="Cuenta bancaria",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    archivo = forms.FileField(
+        label="Archivo",
+        widget=forms.ClearableFileInput(attrs={"class": CLASES_CAMPO}),
+    )
+
+
+class MovimientoExtractoForm(forms.ModelForm):
+    """Formulario de alta/edición manual de movimientos del extracto bancario."""
+
+    class Meta:
+        model = MovimientoExtracto
+        fields = ["cuenta_bancaria", "fecha", "referencia", "detalle", "importe"]
+        labels = {
+            "cuenta_bancaria": "Cuenta bancaria",
+            "fecha": "Fecha",
+            "referencia": "Referencia",
+            "detalle": "Detalle",
+            "importe": "Importe",
+        }
+        widgets = {
+            "cuenta_bancaria": forms.Select(attrs={"class": "form-select"}),
+            "fecha": forms.DateInput(
+                format="%Y-%m-%d",
+                attrs={"class": CLASES_CAMPO, "type": "date"},
+            ),
+            "referencia": forms.TextInput(attrs={"class": CLASES_CAMPO}),
+            "detalle": forms.TextInput(attrs={"class": CLASES_CAMPO}),
+            "importe": forms.TextInput(
+                attrs={"class": CLASES_CAMPO, "inputmode": "decimal"}
+            ),
+        }
+
+    def clean(self):
+        """Valida que el ``importe`` sea ``Decimal`` (nunca ``float``) y no cero."""
+        cleaned_data = super().clean()
+        importe = cleaned_data.get("importe")
+        if isinstance(importe, float):
+            raise forms.ValidationError(
+                "Los importes monetarios no admiten float; use decimal.Decimal."
+            )
+        if importe is not None and importe == 0:
+            raise forms.ValidationError("El importe no puede ser cero.")
+        return cleaned_data
+
+
+class ReporteLibroForm(forms.Form):
+    """Formulario de filtros del Reporte del Libro Bancario (Fase 3 — GREEN).
+
+    Expone los tres filtros del contrato HTTP (``contracts/http-api.md``):
+    ``cuenta`` (selector de cuentas), ``desde`` y ``hasta`` (rango inclusivo de
+    fechas). La validación de ``desde > hasta`` (FR-008) se registra como error
+    no asociado a campo para mostrarse en línea en español.
+    """
+
+    cuenta = forms.ModelChoiceField(
+        queryset=CuentaBancaria.objects.all(),
+        label="Cuenta",
+        empty_label="— Seleccione una cuenta —",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    desde = forms.DateField(
+        label="Desde",
+        widget=forms.DateInput(
+            format="%Y-%m-%d",
+            attrs={"class": CLASES_CAMPO, "type": "date"},
+        ),
+    )
+    hasta = forms.DateField(
+        label="Hasta",
+        widget=forms.DateInput(
+            format="%Y-%m-%d",
+            attrs={"class": CLASES_CAMPO, "type": "date"},
+        ),
+    )
+
+    def clean(self):
+        """Valida que ``desde`` no sea posterior a ``hasta`` (FR-008)."""
+        cleaned_data = super().clean()
+        desde = cleaned_data.get("desde")
+        hasta = cleaned_data.get("hasta")
+        if desde and hasta and desde > hasta:
+            raise forms.ValidationError(
+                "La fecha 'desde' no puede ser posterior a la fecha 'hasta'."
+            )
         return cleaned_data
 
 

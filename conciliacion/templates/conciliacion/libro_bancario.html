@@ -103,6 +103,7 @@
                     <th>Debe</th>
                     <th>Haber</th>
                     <th>Saldo</th>
+                    <th class="text-end">Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -114,10 +115,18 @@
                     <td>{{ movimiento.debe }}</td>
                     <td>{{ movimiento.haber }}</td>
                     <td>{{ movimiento.saldo }}</td>
+                    <td class="text-end">
+                        {% if movimiento.conciliado %}
+                        <span class="badge text-bg-success">🔒 Conciliado</span>
+                        {% else %}
+                        <a href="{% url 'movimientolibro_update' movimiento.pk %}" class="btn btn-sm btn-outline-warning">Editar</a>
+                        <a href="{% url 'movimientolibro_delete' movimiento.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="6" class="text-secondary">Sin movimientos registrados.</td>
+                    <td colspan="7" class="text-secondary">Sin movimientos registrados.</td>
                 </tr>
                 {% endfor %}
             </tbody>

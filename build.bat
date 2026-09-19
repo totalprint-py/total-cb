@@ -7,7 +7,7 @@ REM   Requisitos:
 REM     1. Instalar las dependencias:  pip install -r requirements.txt
 REM     2. Ejecutar este script desde la raiz del proyecto (total-cb).
 REM
-REM   El ejecutable se genera en:  dist\TotalPrint_Conciliacion.exe
+REM   El ejecutable se genera en:  dist\SENDA_Conciliacion.exe
 REM =====================================================================
 setlocal
 
@@ -24,7 +24,7 @@ python -m PyInstaller ^
     --noconfirm ^
     --clean ^
     --onefile ^
-    --name "TotalPrint_Conciliacion" ^
+    --name "SENDA_Conciliacion" ^
     --noconsole ^
     --add-data "templates;templates" ^
     --add-data "conciliacion/templates;conciliacion/templates" ^
@@ -72,7 +72,7 @@ if errorlevel 1 (
     echo [ERROR] La compilacion fallo. Revise los mensajes anteriores.
 ) else (
     echo.
-    echo [OK] Ejecutable generado en: dist\TotalPrint_Conciliacion.exe
+    echo [OK] Ejecutable generado en: dist\SENDA_Conciliacion.exe
 )
 
 endlocal

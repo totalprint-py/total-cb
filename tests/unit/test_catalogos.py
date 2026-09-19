@@ -8,16 +8,25 @@ autonumeración de ``codigo``, y la precisión decimal no negativa de
 """
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
+
 import pytest
+from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models
 from django.db.models import Q
 from django.db.models.constraints import CheckConstraint
+from django.urls import reverse
 
 from conciliacion.models import (
+    AjusteConciliacion,
     Banco,
     ConceptoAjuste,
+    Conciliacion,
+    CuentaBancaria,
     Moneda,
+    MovimientoLibro,
     TipoCuenta,
     TipoOperacion,
 )
@@ -200,3 +209,147 @@ class TestMoneda:
         assert persistida.codigo == "EUR"
         assert persistida.nombre == "Euro"
         assert persistida.cantidad_decimales == 2
+
+
+# ---------------------------------------------------------------------------
+# Eliminación segura de catálogos (PROTECT → mensaje de error).
+# ---------------------------------------------------------------------------
+
+# (modelo, fábrica, URL de eliminación, URL de lista) de cada catálogo eliminable.
+CATALOGOS_CON_ELIMINACION = [
+    (Banco, "banco_factory", "banco_delete", "banco_list"),
+    (TipoCuenta, "tipo_cuenta_factory", "tipocuenta_delete", "tipocuenta_list"),
+    (Moneda, "moneda_factory", "moneda_delete", "moneda_list"),
+    (
+        TipoOperacion,
+        "tipo_operacion_factory",
+        "tipooperacion_delete",
+        "tipooperacion_list",
+    ),
+    (
+        ConceptoAjuste,
+        "concepto_ajuste_factory",
+        "conceptoajuste_delete",
+        "conceptoajuste_list",
+    ),
+]
+
+
+def _crear_cuenta_bancaria(banco, tipo_cuenta, moneda):
+    """Crea y persiste una ``CuentaBancaria`` de apoyo."""
+    return CuentaBancaria.objects.create(
+        numero_cuenta="0001-2345-6789",
+        denominacion="Cuenta de Prueba",
+        banco=banco,
+        tipo_cuenta=tipo_cuenta,
+        moneda=moneda,
+        saldo_inicial=Decimal("1000.00"),
+    )
+
+
+def _crear_dependiente_protegido(registro, request):
+    """Crea un registro que referencia ``registro`` con ``on_delete=PROTECT``."""
+    banco_factory = request.getfixturevalue("banco_factory")
+    tipo_cuenta_factory = request.getfixturevalue("tipo_cuenta_factory")
+    moneda_factory = request.getfixturevalue("moneda_factory")
+
+    if isinstance(registro, (Banco, TipoCuenta, Moneda)):
+        return _crear_cuenta_bancaria(
+            banco=registro if isinstance(registro, Banco) else banco_factory(),
+            tipo_cuenta=(
+                registro
+                if isinstance(registro, TipoCuenta)
+                else tipo_cuenta_factory()
+            ),
+            moneda=registro if isinstance(registro, Moneda) else moneda_factory(),
+        )
+
+    if isinstance(registro, TipoOperacion):
+        cuenta = _crear_cuenta_bancaria(
+            banco_factory(), tipo_cuenta_factory(), moneda_factory()
+        )
+        return MovimientoLibro.objects.create(
+            cuenta=cuenta,
+            fecha=date(2026, 9, 5),
+            tipo_operacion=registro,
+            detalle="Movimiento de prueba",
+            debe=Decimal("10.00"),
+            haber=Decimal("0.00"),
+        )
+
+    if isinstance(registro, ConceptoAjuste):
+        cuenta = _crear_cuenta_bancaria(
+            banco_factory(), tipo_cuenta_factory(), moneda_factory()
+        )
+        conciliacion = Conciliacion.objects.create(
+            cuenta_bancaria=cuenta,
+            fecha_desde=date(2026, 9, 1),
+            fecha_hasta=date(2026, 9, 30),
+        )
+        return AjusteConciliacion.objects.create(
+            conciliacion=conciliacion,
+            concepto_ajuste=registro,
+            importe=Decimal("10.00000000"),
+        )
+
+    raise ValueError(f"Catálogo no soportado con dependencia PROTECT: {type(registro)}")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "modelo, fabrica, url_eliminar, url_lista",
+    CATALOGOS_CON_ELIMINACION,
+    ids=[modelo.__name__ for modelo, *_ in CATALOGOS_CON_ELIMINACION],
+)
+def test_eliminar_catalogo_sin_dependencias(client, request, modelo, fabrica, url_eliminar, url_lista):
+    """Eliminar un catálogo sin dependencias lo borra y redirige a su lista."""
+    registro = request.getfixturevalue(fabrica)()
+    respuesta = client.post(reverse(url_eliminar, args=[registro.pk]))
+
+    assert respuesta.status_code == 302
+    assert respuesta.url == reverse(url_lista)
+    assert not modelo.objects.filter(pk=registro.pk).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "modelo, fabrica, url_eliminar, url_lista",
+    CATALOGOS_CON_ELIMINACION,
+    ids=[modelo.__name__ for modelo, *_ in CATALOGOS_CON_ELIMINACION],
+)
+def test_pagina_de_confirmacion_de_eliminacion(client, request, modelo, fabrica, url_eliminar, url_lista):
+    """La vista de eliminación muestra la confirmación con cancelar y eliminar."""
+    registro = request.getfixturevalue(fabrica)()
+    respuesta = client.get(reverse(url_eliminar, args=[registro.pk]))
+
+    assert respuesta.status_code == 200
+    nombres = [plantilla.name for plantilla in respuesta.templates]
+    assert "conciliacion/confirm_delete.html" in nombres
+    contenido = respuesta.content.decode()
+    assert "Confirmar eliminación" in contenido
+    assert str(registro) in contenido
+    # El enlace "Cancelar" apunta a la lista del catálogo.
+    assert reverse(url_lista) in contenido
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "modelo, fabrica, url_eliminar, url_lista",
+    CATALOGOS_CON_ELIMINACION,
+    ids=[modelo.__name__ for modelo, *_ in CATALOGOS_CON_ELIMINACION],
+)
+def test_eliminar_catalogo_protegido_muestra_error(client, request, modelo, fabrica, url_eliminar, url_lista):
+    """Eliminar un catálogo con dependencias PROTECT redirige con un error visible."""
+    registro = request.getfixturevalue(fabrica)()
+    _crear_dependiente_protegido(registro, request)
+
+    respuesta = client.post(reverse(url_eliminar, args=[registro.pk]))
+
+    assert respuesta.status_code == 302
+    assert respuesta.url == reverse(url_lista)
+    assert modelo.objects.filter(pk=registro.pk).exists()
+
+    mensajes = [str(mensaje) for mensaje in get_messages(respuesta.wsgi_request)]
+    assert len(mensajes) == 1
+    assert "No se puede eliminar" in mensajes[0]
+    assert str(registro) in mensajes[0]

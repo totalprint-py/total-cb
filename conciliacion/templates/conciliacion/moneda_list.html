@@ -27,6 +27,7 @@
                                 <td>{{ moneda.cantidad_decimales }}</td>
                                 <td class="text-end">
                                     <a href="{% url 'moneda_update' moneda.pk %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                                    <a href="{% url 'moneda_delete' moneda.pk %}" class="btn btn-sm btn-outline-danger">Eliminar</a>
                                 </td>
                             </tr>
                             {% empty %}

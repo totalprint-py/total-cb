@@ -17,7 +17,12 @@ from decimal import Decimal
 import pytest
 from django.db import models
 
-from conciliacion.models import CuentaBancaria, MovimientoLibro, TipoOperacion
+from conciliacion.models import (
+    ConciliadoBloqueadoError,
+    CuentaBancaria,
+    MovimientoLibro,
+    TipoOperacion,
+)
 
 FECHA = date(2026, 9, 5)
 
@@ -135,25 +140,25 @@ class TestMotorSaldoMovimientoLibro:
     def test_primer_movimiento_calcula_saldo_desde_saldo_inicial(
         self, cuenta_bancaria, tipo_operacion_factory
     ):
-        """El primer movimiento resta el ``debe`` del ``saldo_inicial`` de la cuenta."""
+        """El primer movimiento suma el ``debe`` al ``saldo_inicial`` de la cuenta."""
         movimiento = _crear_movimiento_libro(
             cuenta_bancaria,
             tipo_operacion_factory(),
             debe=Decimal("250.00"),
         )
-        assert movimiento.saldo == Decimal("750.00")
+        assert movimiento.saldo == Decimal("1250.00")
 
     @pytest.mark.django_db
-    def test_primer_movimiento_suma_haber(
+    def test_primer_movimiento_resta_haber(
         self, cuenta_bancaria, tipo_operacion_factory
     ):
-        """El primer movimiento suma el ``haber`` al ``saldo_inicial`` de la cuenta."""
+        """El primer movimiento resta el ``haber`` del ``saldo_inicial`` de la cuenta."""
         movimiento = _crear_movimiento_libro(
             cuenta_bancaria,
             tipo_operacion_factory(),
             haber=Decimal("300.00"),
         )
-        assert movimiento.saldo == Decimal("1300.00")
+        assert movimiento.saldo == Decimal("700.00")
 
     @pytest.mark.django_db
     def test_movimiento_siguiente_calcula_saldo_desde_anterior(
@@ -170,7 +175,7 @@ class TestMotorSaldoMovimientoLibro:
             fecha=date(2026, 9, 6),
             haber=Decimal("100.00"),
         )
-        assert segundo.saldo == Decimal("850.00")
+        assert segundo.saldo == Decimal("1150.00")
 
     @pytest.mark.django_db
     def test_saldo_calculado_se_persiste(
@@ -183,7 +188,7 @@ class TestMotorSaldoMovimientoLibro:
             debe=Decimal("250.00"),
         )
         persistido = MovimientoLibro.objects.get(pk=movimiento.pk)
-        assert persistido.saldo == Decimal("750.00")
+        assert persistido.saldo == Decimal("1250.00")
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +231,9 @@ class TestRecalcularSaldos:
         primero.refresh_from_db()
         segundo.refresh_from_db()
         tercero.refresh_from_db()
-        assert primero.saldo == Decimal("900.00")  # 1000 - 100
-        assert segundo.saldo == Decimal("700.00")  # 900 - 200
-        assert tercero.saldo == Decimal("750.00")  # 700 + 50
+        assert primero.saldo == Decimal("1100.00")  # 1000 + 100
+        assert segundo.saldo == Decimal("1300.00")  # 1100 + 200
+        assert tercero.saldo == Decimal("1250.00")  # 1300 - 50
 
     @pytest.mark.django_db
     def test_devuelve_movimientos_actualizados(
@@ -248,6 +253,236 @@ class TestRecalcularSaldos:
         movimientos = MovimientoLibro.recalcular_saldos(cuenta_bancaria.pk)
         assert len(movimientos) == 2
         assert [m.saldo for m in movimientos] == [
-            Decimal("990.00"),
             Decimal("1010.00"),
+            Decimal("990.00"),
         ]
+
+    @pytest.mark.django_db
+    def test_recalcula_en_orden_cronologico_con_inserciones_desordenadas(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Ordena por ``(fecha, id)`` aunque los registros se inserten desordenados."""
+        tipo_operacion = tipo_operacion_factory()
+
+        _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 7),
+            debe=Decimal("50.00"),
+        )
+        _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 4),
+            haber=Decimal("20.00"),
+        )
+        _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 5),
+            debe=Decimal("30.00"),
+        )
+
+        movimientos = MovimientoLibro.recalcular_saldos(cuenta_bancaria.pk)
+
+        # Orden estricto por (fecha, id), no por orden de inserción.
+        assert [m.fecha for m in movimientos] == [
+            date(2026, 9, 4),
+            date(2026, 9, 5),
+            date(2026, 9, 7),
+        ]
+        assert [m.saldo for m in movimientos] == [
+            Decimal("980.00"),   # 1000 - 20
+            Decimal("1010.00"),  # 980 + 30
+            Decimal("1060.00"),  # 1010 + 50
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Edición de movimientos y recálculo automático de saldos.
+# ---------------------------------------------------------------------------
+
+
+class TestEdicionMovimientoLibro:
+    """Al editar un movimiento, ``recalcular_saldos`` arregla los saldos corridos."""
+
+    @pytest.mark.django_db
+    def test_editar_primer_movimiento_recalcula_saldos_posteriores(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Editar el primer movimiento actualiza el saldo de todos los siguientes."""
+        tipo_operacion = tipo_operacion_factory()
+        primero = _crear_movimiento_libro(
+            cuenta_bancaria, tipo_operacion, haber=Decimal("50.00")
+        )
+        segundo = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 6),
+            debe=Decimal("100.00"),
+        )
+
+        # Edita el primer movimiento: el haber pasa de 50.00 a 150.00.
+        primero.haber = Decimal("150.00")
+        primero.save(update_fields=["haber"])
+
+        MovimientoLibro.recalcular_saldos(cuenta_bancaria.pk)
+
+        primero.refresh_from_db()
+        segundo.refresh_from_db()
+        assert primero.saldo == Decimal("850.00")  # 1000 - 150
+        assert segundo.saldo == Decimal("950.00")  # 850 + 100
+
+
+# ---------------------------------------------------------------------------
+# Eliminación de movimientos y recálculo automático de saldos.
+# ---------------------------------------------------------------------------
+
+
+class TestEliminacionMovimientoLibro:
+    """Al eliminar un movimiento, ``MovimientoLibro.delete`` recalcula saldos."""
+
+    @pytest.mark.django_db
+    def test_eliminar_movimiento_intermedio_recalcula_saldos_posteriores(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Eliminar un movimiento intermedio recalcula los saldos siguientes."""
+        tipo_operacion = tipo_operacion_factory()
+        primero = _crear_movimiento_libro(
+            cuenta_bancaria, tipo_operacion, debe=Decimal("100.00")
+        )
+        segundo = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 6),
+            debe=Decimal("200.00"),
+        )
+        tercero = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 7),
+            haber=Decimal("50.00"),
+        )
+
+        segundo.delete()
+
+        primero.refresh_from_db()
+        tercero.refresh_from_db()
+        assert primero.saldo == Decimal("1100.00")  # 1000 + 100
+        assert tercero.saldo == Decimal("1050.00")  # 1100 - 50
+
+    @pytest.mark.django_db
+    def test_eliminar_ultimo_movimiento_conserva_anteriores(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Eliminar el último movimiento no altera el saldo de los anteriores."""
+        tipo_operacion = tipo_operacion_factory()
+        primero = _crear_movimiento_libro(
+            cuenta_bancaria, tipo_operacion, debe=Decimal("100.00")
+        )
+        _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 7),
+            haber=Decimal("40.00"),
+        )
+
+        ultimo = MovimientoLibro.objects.filter(cuenta=cuenta_bancaria).order_by(
+            "fecha", "id"
+        ).last()
+        ultimo.delete()
+
+        primero.refresh_from_db()
+        assert MovimientoLibro.objects.filter(cuenta=cuenta_bancaria).count() == 1
+        assert primero.saldo == Decimal("1100.00")
+
+    @pytest.mark.django_db
+    def test_eliminar_primer_movimiento_reinicia_desde_saldo_inicial(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Eliminar el primero recalcula el siguiente desde ``saldo_inicial``."""
+        tipo_operacion = tipo_operacion_factory()
+        _crear_movimiento_libro(
+            cuenta_bancaria, tipo_operacion, debe=Decimal("100.00")
+        )
+        segundo = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion,
+            fecha=date(2026, 9, 6),
+            debe=Decimal("50.00"),
+        )
+
+        primero = MovimientoLibro.objects.filter(cuenta=cuenta_bancaria).order_by(
+            "fecha", "id"
+        ).first()
+        primero.delete()
+
+        segundo.refresh_from_db()
+        assert segundo.saldo == Decimal("1050.00")  # 1000 + 50
+
+
+# ---------------------------------------------------------------------------
+# Bloqueo de movimientos conciliados (US4).
+# ---------------------------------------------------------------------------
+
+
+class TestBloqueoEtiquetaConciliado:
+    """Un ``MovimientoLibro`` puede quedar marcado como ``conciliado=True``."""
+
+    @pytest.mark.django_db
+    def test_crear_movimiento_conciliado_marca_la_etiqueta(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Al crear un movimiento con ``conciliado=True`` el flag queda en ``True``."""
+        movimiento = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion_factory(),
+            debe=Decimal("100.00"),
+            haber=Decimal("0.00"),
+            conciliado=True,
+        )
+        assert movimiento.conciliado is True
+
+
+class TestDeleteConciliadoBloqueado:
+    """``delete()`` bloquea los movimientos ``conciliado`` y permite el resto."""
+
+    @pytest.mark.django_db
+    def test_delete_de_movimiento_conciliado_levanta_error(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Eliminar un movimiento conciliado lanza ``ConciliadoBloqueadoError``."""
+        movimiento = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion_factory(),
+            debe=Decimal("100.00"),
+            haber=Decimal("0.00"),
+            conciliado=True,
+        )
+        pk = movimiento.pk
+
+        with pytest.raises(ConciliadoBloqueadoError):
+            movimiento.delete()
+
+        # La fila sigue existiendo y sus datos no cambiaron.
+        assert MovimientoLibro.objects.filter(pk=pk).exists()
+        movimiento.refresh_from_db()
+        assert movimiento.debe == Decimal("100.00")
+        assert movimiento.haber == Decimal("0.00")
+        assert movimiento.conciliado is True
+
+    @pytest.mark.django_db
+    def test_delete_de_no_conciliado_sigue_funcionando(
+        self, cuenta_bancaria, tipo_operacion_factory
+    ):
+        """Eliminar un movimiento no conciliado no lanza error y borra la fila."""
+        movimiento = _crear_movimiento_libro(
+            cuenta_bancaria,
+            tipo_operacion_factory(),
+            debe=Decimal("100.00"),
+        )
+        pk = movimiento.pk
+
+        movimiento.delete()
+
+        assert not MovimientoLibro.objects.filter(pk=pk).exists()

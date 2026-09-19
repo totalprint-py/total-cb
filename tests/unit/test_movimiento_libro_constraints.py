@@ -97,3 +97,17 @@ class TestMovimientoLibroCheckConstraints:
                     debe=Decimal("0.00"),
                     haber=Decimal("0.00"),
                 )
+
+    @pytest.mark.django_db
+    def test_debe_y_haber_positivos_viola_check_constraint(self, cuenta, tipo_operacion):
+        """``debe`` y ``haber`` positivos a la vez violan el ``CheckConstraint`` (IntegrityError)."""
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                MovimientoLibro.objects.create(
+                    cuenta=cuenta,
+                    fecha=FECHA,
+                    tipo_operacion=tipo_operacion,
+                    detalle="Movimiento ambiguo",
+                    debe=Decimal("100.00"),
+                    haber=Decimal("50.00"),
+                )
