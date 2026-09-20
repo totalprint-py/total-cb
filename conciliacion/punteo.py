@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
-from io import StringIO
+from io import BytesIO, StringIO
 
 from django.db import transaction
 
-from conciliacion.importadores import parsear_extracto
+from conciliacion.importadores import parsear_extracto, parsear_extracto_pdf
 from conciliacion.models import (
     AuditoriaPunteo,
     ConciliadoBloqueadoError,
@@ -42,6 +42,8 @@ def _determinar_formato(archivo) -> str:
         return "csv"
     if extension in (".xlsx", ".xls"):
         return "xlsx"
+    if extension == ".pdf":
+        return "pdf"
     raise ValueError(f"Extensión de archivo no soportada: {extension}")
 
 
@@ -65,11 +67,20 @@ def importar_extracto(cuenta, archivo, *, formato=None, hoja=None):
         if isinstance(contenido, bytes):
             contenido = contenido.decode("utf-8-sig")
         flujo = StringIO(contenido)
+    elif formato == "pdf":
+        # ``pdfplumber`` recibe datos binarios; ``UploadedFile.read()`` ya es bytes.
+        contenido = archivo.read()
+        if isinstance(contenido, str):
+            contenido = contenido.encode("utf-8")
+        flujo = BytesIO(contenido)
     else:
         # ``openpyxl`` acepta cualquier objeto binario similar a archivo.
         flujo = archivo
 
-    filas = parsear_extracto(flujo, formato=formato, hoja=hoja)
+    if formato == "pdf":
+        filas = parsear_extracto_pdf(flujo)
+    else:
+        filas = parsear_extracto(flujo, formato=formato, hoja=hoja)
 
     movimientos = [
         MovimientoExtracto(

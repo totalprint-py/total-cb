@@ -9,6 +9,7 @@ pyinstaller>=6.16
 # Exportación de reportes del Libro Bancario (Principio 4): dependencias puras
 # en Python, seguras para PyInstaller. fpdf2 genera PDF; openpyxl genera XLSX.
 fpdf2>=2.8
+pdfplumber>=0.11
 openpyxl>=3.1
 # --- Empaquetado de escritorio (PyInstaller + Waitress + WhiteNoise) ----------
 # ``waitress``: servidor WSGI de producción que sirve la aplicación empaquetada.

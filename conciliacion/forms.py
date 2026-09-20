@@ -254,7 +254,9 @@ class ExtractoImportarForm(forms.Form):
     )
     archivo = forms.FileField(
         label="Archivo",
-        widget=forms.ClearableFileInput(attrs={"class": CLASES_CAMPO}),
+        widget=forms.ClearableFileInput(
+            attrs={"class": CLASES_CAMPO, "accept": ".csv,.xlsx,.xls,.pdf"}
+        ),
     )
 
 

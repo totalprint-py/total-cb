@@ -25,10 +25,12 @@ mensajes están en español.
 from __future__ import annotations
 
 import csv
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 import openpyxl
+import pdfplumber
 
 
 # ---------------------------------------------------------------------------
@@ -230,4 +232,106 @@ def parsear_extracto(flujo, *, formato: str, hoja=None) -> list:
         registro = _procesar_fila(fila, mapeo)
         if registro is not None:
             resultado.append(registro)
+    return resultado
+
+
+def _parsear_numero_es_py(valor):
+    """Convierte notación es-PY (miles '.', decimal ',') a Decimal."""
+    if valor is None:
+        raise ErrorImportacion("importe vacío")
+    if isinstance(valor, float):
+        raise ErrorImportacion("Los importes monetarios no admiten float")
+    if isinstance(valor, Decimal):
+        return valor
+    if isinstance(valor, int):
+        return Decimal(valor)
+    texto = str(valor).strip()
+    if not texto:
+        raise ErrorImportacion("importe vacío")
+    negativo = texto.startswith("-")
+    texto = texto.lstrip("+-").strip()
+    if "," in texto:
+        # La coma es el separador decimal en es-PY; los puntos son de millares.
+        texto = texto.replace(".", "").replace(",", ".")
+    elif "." in texto:
+        # Sin coma, todo punto es separador de millares (convención es-PY).
+        texto = texto.replace(".", "")
+    try:
+        numero = Decimal(texto)
+    except InvalidOperation:
+        raise ErrorImportacion(f"importe inválido: {valor}") from None
+    return -numero if negativo else numero
+
+
+def _fecha_desde_dia(dia, desde):
+    """Combina el día del movimiento con el mes/año del inicio del periodo."""
+    return date(desde.year, desde.month, dia)
+
+
+def parsear_extracto_pdf(flujo):
+    """Parsea un extracto PDF (giro Continental) a filas canónicas.
+
+    Detecta el rango ``Desde el ...`` y el ``Saldo Anterior``, y reconstruye cada
+    movimiento desde las líneas de texto: los dos últimos números de la línea son
+    monto y saldo; el signo del importe se deriva del saldo corrido (sube → debe
+    positivo, baja → haber negativo). Se salta cabeceras, ``Saldo``\\ * y ``Totales``.
+    """
+    lineas = []
+    with pdfplumber.open(flujo) as pdf_doc:
+        for pagina in pdf_doc.pages:
+            texto = pagina.extract_text() or ""
+            for linea in texto.split("\n"):
+                if linea.strip():
+                    lineas.append(linea.strip())
+
+    desde = None
+    saldo_anterior = Decimal("0.00")
+    for linea in lineas:
+        m = re.search(r"Desde\s*el\s*(\d{2})/(\d{2})/(\d{4})", linea, re.I)
+        if m:
+            desde = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        m = re.search(r"Saldo Anterior[:\s]*([+-]?[0-9.,]+)", linea, re.I)
+        if m:
+            saldo_anterior = _parsear_numero_es_py(m.group(1))
+
+    if desde is None:
+        raise ErrorImportacion("No se encontró el rango de fechas del extracto.")
+
+    saldo_previo = saldo_anterior
+    resultado = []
+    for linea in lineas:
+        bajo = linea.lower()
+        if bajo.startswith("dia hora") or "descripción" in bajo or "descripcin" in bajo:
+            continue
+        if bajo.startswith("totales") or bajo.startswith("saldo") or bajo.startswith("desde el"):
+            continue
+        tokens = linea.split()
+        if len(tokens) < 4:
+            continue
+        try:
+            dia = int(tokens[0])
+        except ValueError:
+            continue
+        try:
+            ultimo = _parsear_numero_es_py(tokens[-1])
+        except ErrorImportacion:
+            continue
+        if ultimo == saldo_previo:
+            # Fila sin saldo impreso (el banco omite el saldo 0 al saltar de página):
+            # el último token es el IMPORTE real, no el saldo.
+            if "db" in bajo:            # débito = salida de dinero
+                importe = -abs(ultimo)
+            else:                       # crédito = entrada de dinero
+                importe = abs(ultimo)
+            saldo = saldo_previo + importe
+        else:
+            saldo = ultimo
+            importe = saldo - saldo_previo
+        resultado.append({
+            "fecha": _fecha_desde_dia(dia, desde),
+            "referencia": "",
+            "detalle": " ".join(tokens[2:-2]),
+            "importe": importe,
+        })
+        saldo_previo = saldo
     return resultado
