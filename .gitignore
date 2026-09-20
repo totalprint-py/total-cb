@@ -12,6 +12,9 @@ env/
 db.sqlite3
 *.sqlite3
 
+# Backups de la base de datos local (no versionar y no capturar con git add -A)
+db.sqlite3.backup-*
+
 # Estáticos generados por collectstatic
 staticfiles/
 
