@@ -312,6 +312,65 @@ class TestExtractoImportar:
         assert any("importe cero" in error for error in errores)
 
     @pytest.mark.django_db
+    def test_reimport_no_duplica_filas_existentes(self, client, cuenta_bancaria):
+        """Re-importar un archivo con filas ya existentes no crea duplicados."""
+        archivo = _csv_archivo(
+            ["fecha", "referencia", "detalle", "importe"],
+            ["2026-08-24", "REF-1", "Depósito BELLINI", "980000"],
+            ["2026-08-25", "", "EGRESO COMPRA", "-120200000"],
+        )
+        client.post(reverse(NOMBRE_URL_IMPORTAR), {"cuenta": cuenta_bancaria.pk, "archivo": archivo})
+        assert MovimientoExtracto.objects.filter(cuenta_bancaria=cuenta_bancaria).count() == 2
+
+        # Re-importar el mismo contenido (archivo nuevo, puntero en cero).
+        archivo_repetido = _csv_archivo(
+            ["fecha", "referencia", "detalle", "importe"],
+            ["2026-08-24", "REF-1", "Depósito BELLINI", "980000"],
+            ["2026-08-25", "", "EGRESO COMPRA", "-120200000"],
+        )
+        respuesta = client.post(
+            reverse(NOMBRE_URL_IMPORTAR), {"cuenta": cuenta_bancaria.pk, "archivo": archivo_repetido}
+        )
+        assert respuesta.status_code == 302
+        assert MovimientoExtracto.objects.filter(cuenta_bancaria=cuenta_bancaria).count() == 2
+
+    @pytest.mark.django_db
+    def test_import_salta_solo_las_filas_duplicadas(self, client, cuenta_bancaria):
+        """Un lote con filas nuevas y repetidas persiste únicamente las nuevas."""
+        inicial = _csv_archivo(
+            ["fecha", "referencia", "detalle", "importe"],
+            ["2026-08-24", "REF-1", "Depósito BELLINI", "980000"],
+        )
+        client.post(reverse(NOMBRE_URL_IMPORTAR), {"cuenta": cuenta_bancaria.pk, "archivo": inicial})
+
+        mixto = _csv_archivo(
+            ["fecha", "referencia", "detalle", "importe"],
+            ["2026-08-24", "REF-1", "Depósito BELLINI", "980000"],  # duplicada
+            ["2026-08-26", "", "NUEVA OPERACIÓN", "50000"],          # nueva
+        )
+        respuesta = client.post(
+            reverse(NOMBRE_URL_IMPORTAR), {"cuenta": cuenta_bancaria.pk, "archivo": mixto}
+        )
+        assert respuesta.status_code == 302
+        filas = MovimientoExtracto.objects.filter(cuenta_bancaria=cuenta_bancaria)
+        assert filas.count() == 2
+        assert {f.detalle for f in filas} == {"Depósito BELLINI", "NUEVA OPERACIÓN"}
+
+    @pytest.mark.django_db
+    def test_import_dedup_dentro_del_mismo_lote(self, client, cuenta_bancaria):
+        """Dos filas idénticas dentro del mismo archivo se importan una sola vez."""
+        archivo = _csv_archivo(
+            ["fecha", "referencia", "detalle", "importe"],
+            ["2026-08-24", "REF-1", "Depósito BELLINI", "980000"],
+            ["2026-08-24", "REF-1", "Depósito BELLINI", "980000"],
+        )
+        respuesta = client.post(
+            reverse(NOMBRE_URL_IMPORTAR), {"cuenta": cuenta_bancaria.pk, "archivo": archivo}
+        )
+        assert respuesta.status_code == 302
+        assert MovimientoExtracto.objects.filter(cuenta_bancaria=cuenta_bancaria).count() == 1
+
+    @pytest.mark.django_db
     def test_get_muestra_formulario(self, client, cuenta_bancaria):
         respuesta = client.get(reverse(NOMBRE_URL_IMPORTAR))
         assert respuesta.status_code == 200

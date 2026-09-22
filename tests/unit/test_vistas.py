@@ -245,18 +245,24 @@ class TestVistaTablero:
         assert PLANTILLA_TABLERO in nombres_plantillas
 
     @pytest.mark.django_db
-    def test_tablero_pasa_movimientos_bancarios_sin_conciliar(self, client, movimiento_bancario):
-        """Los movimientos bancarios sin conciliar se pasan en el contexto."""
+    def test_tablero_expone_conteo_extractos_pendientes(self, client):
+        """El tablero expone el conteo de extractos pendientes (motor nuevo)."""
         respuesta = client.get(reverse(NOMBRE_URL_TABLERO))
-        movimientos = list(respuesta.context[CLAVE_CONTEXTO_BANCARIOS])
-        assert movimiento_bancario in movimientos
+        assert respuesta.context["extractos_pendientes"] == 0
 
     @pytest.mark.django_db
-    def test_tablero_pasa_movimientos_internos_sin_conciliar(self, client, movimiento_interno):
-        """Los movimientos internos sin conciliar se pasan en el contexto."""
+    def test_tablero_expone_conteo_libros_pendientes(self, client):
+        """El tablero expone el conteo de libros pendientes (motor nuevo)."""
         respuesta = client.get(reverse(NOMBRE_URL_TABLERO))
-        movimientos = list(respuesta.context[CLAVE_CONTEXTO_INTERNOS])
-        assert movimiento_interno in movimientos
+        assert respuesta.context["libros_pendientes"] == 0
+
+    @pytest.mark.django_db
+    def test_tablero_muestra_kpis_del_motor_nuevo(self, client):
+        """El dashboard renderiza las etiquetas de extracto y libro pendientes."""
+        respuesta = client.get(reverse(NOMBRE_URL_TABLERO))
+        contenido = respuesta.content.decode("utf-8")
+        assert "Extractos Pendientes" in contenido
+        assert "Libros Pendientes" in contenido
 
 
 # ---------------------------------------------------------------------------

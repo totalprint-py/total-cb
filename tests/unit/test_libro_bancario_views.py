@@ -110,12 +110,12 @@ class TestLibroBancarioGet:
 
     @pytest.mark.django_db
     def test_movimientos_ordenados_por_fecha_id(self, client, cuenta, tipo_operacion):
-        """Los movimientos se devuelven en orden cronológico (fecha, id)."""
+        """Los movimientos se devuelven del más reciente al más antiguo (fecha, id)."""
         _crear_movimiento(cuenta, tipo_operacion, fecha=date(2026, 9, 6), debe=Decimal("200.00"))
         _crear_movimiento(cuenta, tipo_operacion, fecha=date(2026, 9, 5), debe=Decimal("100.00"))
         respuesta = client.get(reverse(NOMBRE_URL_LIBRO), {"cuenta": cuenta.pk})
         movimientos = list(respuesta.context["movimientos"])
-        assert [m.fecha for m in movimientos] == [date(2026, 9, 5), date(2026, 9, 6)]
+        assert [m.fecha for m in movimientos] == [date(2026, 9, 6), date(2026, 9, 5)]
 
     @pytest.mark.django_db
     def test_saldo_inicial_del_contexto(self, client, cuenta):

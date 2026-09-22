@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
+from typing import NamedTuple
 from io import BytesIO, StringIO
 
 from django.db import transaction
@@ -47,6 +48,31 @@ def _determinar_formato(archivo) -> str:
     raise ValueError(f"Extensión de archivo no soportada: {extension}")
 
 
+def _normalizar_detalle(detalle) -> str:
+    """Colapsa espacios en blanco para comparar detalles de forma robusta."""
+    return " ".join((detalle or "").split())
+
+
+def _clave_deduplicacion(fila, moneda) -> tuple:
+    """Clave natural del extracto: fecha + detalle normalizado + importe quantizado.
+
+    El PDF de este banco no trae numero de referencia, por lo que la clave de
+    duplicidad se reduce a estos tres campos (Opcion B).
+    """
+    return (
+        fila["fecha"],
+        _normalizar_detalle(fila["detalle"]),
+        quantize_to_moneda(fila["importe"], moneda),
+    )
+
+
+class ResultadoImportacion(NamedTuple):
+    """Resultado de importar_extracto: filas creadas y omitidas por duplicado."""
+
+    creados: list
+    omitidos: list
+
+
 @transaction.atomic
 def importar_extracto(cuenta, archivo, *, formato=None, hoja=None):
     """Parsea un extracto y persiste sus movimientos de forma todo-o-nada.
@@ -54,9 +80,11 @@ def importar_extracto(cuenta, archivo, *, formato=None, hoja=None):
     Pre: ``cuenta`` es una ``CuentaBancaria`` válida y ``archivo`` es un archivo
     subido (``UploadedFile``) con extensión ``.csv`` o ``.xlsx``.
 
-    Post: devuelve la lista de ``MovimientoExtracto`` creados con
-    ``origen=ORIGEN_IMPORTACION``. Cualquier fila inválida del parser revierte
-    la transacción propagando ``ErrorImportacion``.
+    Post: devuelve un ``ResultadoImportacion`` con los ``MovimientoExtracto``
+    creados (``origen=ORIGEN_IMPORTACION``) y las filas omitidas por ser
+    duplicados de movimientos ya existentes en la cuenta (clave natural
+    fecha+detalle+importe). Cualquier fila inválida del parser revierte la
+    transacción propagando ``ErrorImportacion``.
     """
     if formato is None:
         formato = _determinar_formato(archivo)
@@ -82,22 +110,38 @@ def importar_extracto(cuenta, archivo, *, formato=None, hoja=None):
     else:
         filas = parsear_extracto(flujo, formato=formato, hoja=hoja)
 
-    movimientos = [
-        MovimientoExtracto(
-            cuenta_bancaria=cuenta,
-            fecha=fila["fecha"],
-            referencia=fila.get("referencia", ""),
-            detalle=fila["detalle"],
-            importe=fila["importe"],
-            origen=MovimientoExtracto.ORIGEN_IMPORTACION,
+    moneda = cuenta.moneda
+    existentes = {
+        (fecha, _normalizar_detalle(detalle), quantize_to_moneda(importe, moneda))
+        for fecha, detalle, importe in MovimientoExtracto.objects.filter(
+            cuenta_bancaria=cuenta
+        ).values_list("fecha", "detalle", "importe")
+    }
+
+    creados = []
+    omitidos = []
+    for fila in filas:
+        clave = _clave_deduplicacion(fila, moneda)
+        if clave in existentes:
+            omitidos.append(fila)
+            continue
+        # Se agrega a existentes para deduplicar tambien dentro del mismo lote.
+        existentes.add(clave)
+        creados.append(
+            MovimientoExtracto(
+                cuenta_bancaria=cuenta,
+                fecha=fila["fecha"],
+                referencia=fila.get("referencia", ""),
+                detalle=fila["detalle"],
+                importe=fila["importe"],
+                origen=MovimientoExtracto.ORIGEN_IMPORTACION,
+            )
         )
-        for fila in filas
-    ]
 
-    if movimientos:
-        MovimientoExtracto.objects.bulk_create(movimientos)
+    if creados:
+        MovimientoExtracto.objects.bulk_create(creados)
 
-    return movimientos
+    return ResultadoImportacion(creados=creados, omitidos=omitidos)
 
 
 class ImporteNoCoincideError(Exception):

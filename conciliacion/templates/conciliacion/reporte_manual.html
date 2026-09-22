@@ -7,7 +7,10 @@
 <link rel="stylesheet" href="{% static 'css/print.css' %}">
 
 <div class="no-print d-flex justify-content-between align-items-center mb-4">
-    <h2 class="fw-semibold mb-0">Reporte de Verificación Manual</h2>
+    <div>
+        <img src="{% static 'img/logo_senda.png' %}" alt="Senda S.R.L." class="mb-2" style="max-height: 48px;">
+        <h2 class="fw-semibold mb-0">Reporte de Verificación Manual</h2>
+    </div>
     <div class="d-flex gap-2">
         <button type="button" onclick="window.print()" class="btn btn-outline-secondary">Imprimir</button>
         <a href="{% url 'tablero' %}" class="btn btn-primary">Volver al tablero</a>

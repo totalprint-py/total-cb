@@ -88,6 +88,14 @@
 </form>
 {% endif %}
 
+{% if cuenta %}
+<datalist id="detalles-libro">
+    {% for detalle in detalles_existentes %}
+    <option value="{{ detalle }}"></option>
+    {% endfor %}
+</datalist>
+{% endif %}
+
 <div class="card shadow-sm">
     <div class="card-header bg-dark text-white d-flex align-items-center justify-content-between">
         <h2 class="h6 fw-semibold mb-0">Libro mayor</h2>

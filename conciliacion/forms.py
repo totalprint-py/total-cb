@@ -180,7 +180,9 @@ class MovimientoLibroForm(forms.ModelForm):
                 attrs={"class": CLASES_CAMPO, "type": "date", "autofocus": "autofocus"},
             ),
             "tipo_operacion": forms.Select(attrs={"class": "form-select"}),
-            "detalle": forms.TextInput(attrs={"class": CLASES_CAMPO}),
+            "detalle": forms.TextInput(
+                attrs={"class": CLASES_CAMPO, "list": "detalles-libro"}
+            ),
         }
 
     def clean(self):

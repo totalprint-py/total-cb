@@ -96,10 +96,15 @@ def _movimientos_internos_sin_conciliar():
 
 
 def tablero(request):
-    """Pantalla dividida: bancarios vs. internos sin conciliar (FR-016)."""
+    """Panel de control del motor de extracto y punteo (v2.0)."""
+    extractos_pendientes = MovimientoExtracto.objects.filter(
+        conciliado=False
+    ).count()
+    libros_pendientes = MovimientoLibro.objects.filter(conciliado=False).count()
     contexto = {
-        "movimientos_bancarios": _movimientos_bancarios_sin_conciliar(),
-        "movimientos_internos": _movimientos_internos_sin_conciliar(),
+        "extractos_pendientes": extractos_pendientes,
+        "libros_pendientes": libros_pendientes,
+        "pendientes_totales": extractos_pendientes + libros_pendientes,
     }
     return render(request, "conciliacion/matcher.html", contexto)
 
@@ -513,14 +518,25 @@ def libro_bancario(request):
         cuenta = cuentas.first()
 
     movimientos = (
-        MovimientoLibro.objects.filter(cuenta=cuenta).order_by("fecha", "id")
+        MovimientoLibro.objects.filter(cuenta=cuenta).order_by("-fecha", "-id")
         if cuenta is not None
         else MovimientoLibro.objects.none()
+    )
+    detalles_existentes = (
+        MovimientoLibro.objects.filter(cuenta=cuenta)
+        .exclude(detalle="")
+        .exclude(detalle__isnull=True)
+        .order_by("detalle")
+        .values_list("detalle", flat=True)
+        .distinct()
+        if cuenta is not None
+        else []
     )
     contexto = {
         "cuentas": cuentas,
         "cuenta": cuenta,
         "movimientos": movimientos,
+        "detalles_existentes": detalles_existentes,
         "form": MovimientoLibroForm(),
         "saldo_inicial": (
             cuenta.saldo_inicial if cuenta is not None else Decimal("0.00")
@@ -551,7 +567,15 @@ def libro_bancario_crear(request):
         "cuentas": CuentaBancaria.objects.all(),
         "cuenta": cuenta,
         "movimientos": MovimientoLibro.objects.filter(cuenta=cuenta).order_by(
-            "fecha", "id"
+            "-fecha", "-id"
+        ),
+        "detalles_existentes": (
+            MovimientoLibro.objects.filter(cuenta=cuenta)
+            .exclude(detalle="")
+            .exclude(detalle__isnull=True)
+            .order_by("detalle")
+            .values_list("detalle", flat=True)
+            .distinct()
         ),
         "form": form,
         "saldo_inicial": cuenta.saldo_inicial,
@@ -812,14 +836,16 @@ def extracto_importar(request):
             cuenta = form.cleaned_data["cuenta"]
             archivo = request.FILES["archivo"]
             try:
-                movimientos = importar_extracto(cuenta, archivo)
+                resultado = importar_extracto(cuenta, archivo)
             except ErrorImportacion as exc:
                 return render(
                     request,
                     "conciliacion/extracto_importar.html",
                     {"form": form, "errores": [str(exc)]},
                 )
-            if not movimientos:
+            creados = resultado.creados
+            omitidos = resultado.omitidos
+            if not creados and not omitidos:
                 return render(
                     request,
                     "conciliacion/extracto_importar.html",
@@ -828,9 +854,21 @@ def extracto_importar(request):
                         "errores": ["El archivo no contiene movimientos para importar."],
                     },
                 )
-            messages.success(
-                request, f"Se importaron {len(movimientos)} movimientos."
-            )
+            if not creados:
+                messages.warning(
+                    request,
+                    f"No se importaron movimientos nuevos: {len(omitidos)} ya existian.",
+                )
+                return redirect("extracto_list")
+            if omitidos:
+                messages.success(
+                    request,
+                    f"Se importaron {len(creados)} movimientos. Se omitieron {len(omitidos)} ya existentes.",
+                )
+            else:
+                messages.success(
+                    request, f"Se importaron {len(creados)} movimientos."
+                )
             return redirect("extracto_list")
     else:
         form = ExtractoImportarForm()

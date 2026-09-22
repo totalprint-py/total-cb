@@ -23,7 +23,7 @@
                 <h1 class="fs-6 fw-semibold mb-1">Senda S.R.L. - Conciliación</h1>
                 <p class="small text-white-50 mb-0">Gestión de conciliación bancaria</p>
             </div>
-            <nav class="nav flex-column flex-grow-1 overflow-auto">
+            <nav class="nav flex-column flex-grow-1 overflow-y-auto overflow-x-hidden">
                 <div class="small text-white-50 text-uppercase fw-semibold px-2 mt-2 mb-1">PRINCIPAL</div>
                 <a href="{% url 'tablero' %}" class="nav-link text-white bg-primary rounded d-flex align-items-center gap-2 mb-1">
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -58,12 +58,6 @@
                     </svg>
                     Reporte Bancario
                 </a>
-                <a href="{% url 'reporte_manual' %}" title="Reporte de Verificación Manual" class="nav-link text-white d-flex align-items-center gap-2">
-                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                    </svg>
-                    Reporte Manual
-                </a>
                 <div class="small text-white-50 text-uppercase fw-semibold px-2 mt-3 mb-1">CATÁLOGOS</div>
                 <div x-data="{ abierto: false }">
                     <button type="button"
@@ -80,13 +74,13 @@
                     <div x-cloak
                          x-show="abierto"
                          @click.away="abierto = false"
-                         class="ps-3">
-                        <a href="{% url 'banco_list' %}" class="nav-link text-white py-1">Bancos</a>
-                        <a href="{% url 'cuentabancaria_list' %}" class="nav-link text-white py-1">Cuentas Bancarias</a>
-                        <a href="{% url 'tipocuenta_list' %}" class="nav-link text-white py-1">Tipos de Cuenta</a>
-                        <a href="{% url 'moneda_list' %}" class="nav-link text-white py-1">Monedas</a>
-                        <a href="{% url 'tipooperacion_list' %}" class="nav-link text-white py-1">Tipos de Operación</a>
-                        <a href="{% url 'conceptoajuste_list' %}" class="nav-link text-white py-1">Conceptos de Ajuste</a>
+                         class="ps-3 d-flex flex-column">
+                        <a href="{% url 'banco_list' %}" class="nav-link text-white py-1 text-wrap">Bancos</a>
+                        <a href="{% url 'cuentabancaria_list' %}" class="nav-link text-white py-1 text-wrap">Cuentas Bancarias</a>
+                        <a href="{% url 'tipocuenta_list' %}" class="nav-link text-white py-1 text-wrap">Tipos de Cuenta</a>
+                        <a href="{% url 'moneda_list' %}" class="nav-link text-white py-1 text-wrap">Monedas</a>
+                        <a href="{% url 'tipooperacion_list' %}" class="nav-link text-white py-1 text-wrap">Tipos de Operación</a>
+                        <a href="{% url 'conceptoajuste_list' %}" class="nav-link text-white py-1 text-wrap">Conceptos de Ajuste</a>
                     </div>
                 </div>
             </nav>

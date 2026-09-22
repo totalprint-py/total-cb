@@ -29,6 +29,7 @@ from fpdf.enums import XPos, YPos
 from openpyxl import Workbook
 
 from conciliacion.reportes import ReporteLibro
+from totalcb import paths
 
 BOM_UTF8 = "\ufeff"
 ENCABEZADO = ["Fecha", "Tipo", "Detalle", "Debe", "Haber", "Saldo"]
@@ -146,8 +147,29 @@ def exportar_pdf(reporte: ReporteLibro) -> bytes:
     return bytes(pdf.output())
 
 
+def _ruta_logo():
+    """Devuelve la ruta del logo corporativo (None si no está disponible).
+
+    Resuelve la ubicación del asset tanto en desarrollo (BASE_DIR/static)
+    como en el ejecutable empaquetado (sys._MEIPASS/static), sin lanzar
+    excepción si el archivo falta: el PDF se genera igual, solo sin logo.
+    """
+    ruta = paths.static_root() / "img" / "logo_senda.png"
+    return str(ruta) if ruta.is_file() else None
+
+
 def _encabezado_pdf(pdf: FPDF, reporte: ReporteLibro) -> None:
-    """Dibuja título, cuenta y rango de fechas del documento."""
+    """Dibuja el logo corporativo, el título, la cuenta y el rango de fechas."""
+    logo = _ruta_logo()
+    if logo is not None:
+        # El logo es 360x60 px (relación 6:1); se muestra a 60 mm de ancho,
+        # centrado horizontalmente sobre una hoja A4 de 210 mm de ancho.
+        ancho_logo = 60.0
+        alto_logo = ancho_logo * (60 / 360)
+        x = (210 - ancho_logo) / 2
+        pdf.image(logo, x=x, y=pdf.get_y(), w=ancho_logo, h=alto_logo)
+        pdf.ln(alto_logo + 2)
+
     pdf.set_font("helvetica", "B", 16)
     pdf.cell(0, 10, PDF_TITULO, align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
